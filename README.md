@@ -37,7 +37,7 @@ npm run build
 Register the extension with hydra:
 
 ```sh
-hydra-acp extensions add hydra-acp-archiver --command hydra-acp-archiver
+hydra-acp extensions add hydra-acp-archiver
 ```
 
 Or pointed at a local build:

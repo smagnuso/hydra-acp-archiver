@@ -1,4 +1,3 @@
-import { hostname } from "node:os";
 import type { SyncBackend } from "./backend/types.js";
 import type { DaemonClient } from "./daemon.js";
 import { deserialize, type SyncEnvelope } from "./envelope.js";
@@ -12,18 +11,14 @@ export interface PullLoopOptions {
   backend: SyncBackend;
   state: SyncState;
   intervalMs: number;
-  host?: string;
 }
 
 export class PullLoop {
-  private readonly host: string;
   private timer: NodeJS.Timeout | undefined;
   private stopped = false;
   private inFlight = false;
 
-  constructor(private readonly opts: PullLoopOptions) {
-    this.host = opts.host ?? safeHostname();
-  }
+  constructor(private readonly opts: PullLoopOptions) {}
 
   start(): void {
     log.info(
@@ -55,12 +50,22 @@ export class PullLoop {
     }
     this.inFlight = true;
     try {
+      // Snapshot the daemon's session set once per tick. Any envelope
+      // whose inner bundle.session.sessionId is already present locally
+      // is one we (or a peer using our credentials) uploaded — skip it.
+      let localSessionIds: Set<string>;
+      try {
+        localSessionIds = await this.opts.daemon.listSessionIds();
+      } catch (err) {
+        log.warn(`session list failed; skipping tick: ${(err as Error).message}`);
+        return;
+      }
       const entries = await this.opts.backend.list();
       for (const entry of entries) {
         if (this.stopped) {
           return;
         }
-        await this.processEntry(entry.key).catch((err: unknown) => {
+        await this.processEntry(entry.key, localSessionIds).catch((err: unknown) => {
           log.warn(
             `processing ${entry.key} failed: ${(err as Error).message}`,
           );
@@ -73,7 +78,10 @@ export class PullLoop {
     }
   }
 
-  private async processEntry(key: string): Promise<void> {
+  private async processEntry(
+    key: string,
+    localSessionIds: Set<string>,
+  ): Promise<void> {
     const raw = await this.opts.backend.get(key);
     let envelope: SyncEnvelope;
     try {
@@ -83,16 +91,18 @@ export class PullLoop {
       return;
     }
     const { lineageId } = envelope;
-    const local = this.opts.state.get(lineageId);
 
-    // Self-loop suppression: our own upload echoing back through the
-    // backend. We recognize it by host + matching hash.
-    if (
-      envelope.uploadedBy.host === this.host &&
-      envelope.bundleHash === local.lastUploadedHash
-    ) {
+    // Self-loop suppression: if the bundle's sessionId already exists
+    // in the local daemon, we (or a peer reflecting our upload) made
+    // this — no need to import. This survives hostname changes and
+    // race-conditions with state writes that a hostname or hash check
+    // would not.
+    const innerSessionId = readSessionId(envelope.bundle);
+    if (innerSessionId !== undefined && localSessionIds.has(innerSessionId)) {
       return;
     }
+
+    const local = this.opts.state.get(lineageId);
 
     if (
       local.lastSeenRemoteUploadedAt !== undefined &&
@@ -136,10 +146,14 @@ export class PullLoop {
   }
 }
 
-function safeHostname(): string {
-  try {
-    return hostname();
-  } catch {
-    return "unknown";
+function readSessionId(bundle: unknown): string | undefined {
+  if (!bundle || typeof bundle !== "object" || Array.isArray(bundle)) {
+    return undefined;
   }
+  const session = (bundle as Record<string, unknown>).session;
+  if (!session || typeof session !== "object" || Array.isArray(session)) {
+    return undefined;
+  }
+  const id = (session as Record<string, unknown>).sessionId;
+  return typeof id === "string" ? id : undefined;
 }

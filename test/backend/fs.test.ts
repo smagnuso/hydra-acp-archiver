@@ -29,8 +29,8 @@ test("put then get round-trips data", async () => {
     const fs = new FsBackend({ dir });
     await fs.init();
     const data = Buffer.from(JSON.stringify({ hello: "world" }), "utf8");
-    await fs.put("a.hydra.sync", data);
-    const back = await fs.get("a.hydra.sync");
+    await fs.put("a.hydra.archive", data);
+    const back = await fs.get("a.hydra.archive");
     assert.deepEqual(back.toString("utf8"), data.toString("utf8"));
   } finally {
     cleanup();
@@ -42,9 +42,9 @@ test("put is upsert and overwrites prior content", async () => {
   try {
     const fs = new FsBackend({ dir });
     await fs.init();
-    await fs.put("x.hydra.sync", Buffer.from("first"));
-    await fs.put("x.hydra.sync", Buffer.from("second"));
-    const back = await fs.get("x.hydra.sync");
+    await fs.put("x.hydra.archive", Buffer.from("first"));
+    await fs.put("x.hydra.archive", Buffer.from("second"));
+    const back = await fs.get("x.hydra.archive");
     assert.equal(back.toString("utf8"), "second");
   } finally {
     cleanup();
@@ -56,13 +56,13 @@ test("list returns one entry per put (ignoring tmp files)", async () => {
   try {
     const fs = new FsBackend({ dir });
     await fs.init();
-    await fs.put("a.hydra.sync", Buffer.from("a"));
-    await fs.put("b.hydra.sync", Buffer.from("bb"));
+    await fs.put("a.hydra.archive", Buffer.from("a"));
+    await fs.put("b.hydra.archive", Buffer.from("bb"));
     const entries = await fs.list();
     const names = entries.map((e) => e.key).sort();
-    assert.deepEqual(names, ["a.hydra.sync", "b.hydra.sync"]);
-    const a = entries.find((e) => e.key === "a.hydra.sync");
-    const b = entries.find((e) => e.key === "b.hydra.sync");
+    assert.deepEqual(names, ["a.hydra.archive", "b.hydra.archive"]);
+    const a = entries.find((e) => e.key === "a.hydra.archive");
+    const b = entries.find((e) => e.key === "b.hydra.archive");
     assert.equal(a?.size, 1);
     assert.equal(b?.size, 2);
   } finally {
@@ -75,9 +75,9 @@ test("delete removes the file and is idempotent", async () => {
   try {
     const fs = new FsBackend({ dir });
     await fs.init();
-    await fs.put("z.hydra.sync", Buffer.from("z"));
-    await fs.delete("z.hydra.sync");
-    await fs.delete("z.hydra.sync"); // second delete should not throw
+    await fs.put("z.hydra.archive", Buffer.from("z"));
+    await fs.delete("z.hydra.archive");
+    await fs.delete("z.hydra.archive"); // second delete should not throw
     assert.deepEqual(await fs.list(), []);
   } finally {
     cleanup();
@@ -89,10 +89,10 @@ test("put writes via tmp+rename — no .tmp left on disk after success", async (
   try {
     const fs = new FsBackend({ dir });
     await fs.init();
-    await fs.put("k.hydra.sync", Buffer.from("data"));
+    await fs.put("k.hydra.archive", Buffer.from("data"));
     const entries = await fs.list();
     assert.equal(entries.length, 1);
-    assert.equal(readFileSync(join(dir, "k.hydra.sync"), "utf8"), "data");
+    assert.equal(readFileSync(join(dir, "k.hydra.archive"), "utf8"), "data");
   } finally {
     cleanup();
   }

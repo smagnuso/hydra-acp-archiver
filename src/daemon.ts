@@ -29,6 +29,25 @@ export interface DaemonClientOptions {
 export class DaemonClient {
   constructor(private readonly opts: DaemonClientOptions) {}
 
+  async listSessionIds(): Promise<Set<string>> {
+    const r = await fetch(`${this.opts.daemonUrl}/v1/sessions`, {
+      headers: { Authorization: `Bearer ${this.opts.token}` },
+    });
+    if (!r.ok) {
+      throw new Error(`list sessions: HTTP ${r.status}`);
+    }
+    const body = (await r.json()) as {
+      sessions: Array<{ sessionId: string }>;
+    };
+    const out = new Set<string>();
+    for (const s of body.sessions) {
+      if (typeof s.sessionId === "string") {
+        out.add(s.sessionId);
+      }
+    }
+    return out;
+  }
+
   async exportSession(sessionId: string): Promise<SessionBundle> {
     const url = `${this.opts.daemonUrl}/v1/sessions/${encodeURIComponent(sessionId)}/export`;
     const r = await fetch(url, {

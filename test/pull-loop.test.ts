@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FsBackend } from "../src/backend/fs.js";
 import {
-  hashBundle,
   keyFor,
   serialize,
   wrap,
@@ -16,13 +15,12 @@ import { SyncState } from "../src/state.js";
 import type { DaemonClient, SessionBundle } from "../src/daemon.js";
 
 const LINEAGE = "hydra_lineage_pull_test_0001";
-const SELF_HOST = "this-host";
 const REMOTE_HOST = "other-host";
 
-function bundle(history: unknown[] = []): SessionBundle {
+function bundle(sessionId: string, history: unknown[] = []): SessionBundle {
   return {
     version: 1,
-    session: { sessionId: "s1", lineageId: LINEAGE, cwd: "/tmp/x" },
+    session: { sessionId, lineageId: LINEAGE, cwd: "/tmp/x" },
     history,
   };
 }
@@ -40,6 +38,7 @@ interface Fixture {
   backend: FsBackend;
   state: SyncState;
   imports: SessionBundle[];
+  localSessionIds: Set<string>;
   cleanup: () => void;
 }
 
@@ -48,7 +47,9 @@ function setup(): Fixture {
   const backend = new FsBackend({ dir: join(dir, "backend") });
   const state = new SyncState(join(dir, "state.json"));
   const imports: SessionBundle[] = [];
+  const localSessionIds = new Set<string>();
   const daemon: Partial<DaemonClient> = {
+    listSessionIds: async () => new Set(localSessionIds),
     importBundle: async (b: SessionBundle) => {
       imports.push(b);
       return { sessionId: b.session.sessionId };
@@ -59,13 +60,13 @@ function setup(): Fixture {
     backend,
     state,
     intervalMs: 60_000,
-    host: SELF_HOST,
   });
   return {
     pull,
     backend,
     state,
     imports,
+    localSessionIds,
     cleanup: () => rmSync(dir, { recursive: true, force: true }),
   };
 }
@@ -76,7 +77,7 @@ test("imports a fresh remote envelope and updates state", async () => {
     await f.backend.init();
     await f.state.load();
     const env = envelopeFor(
-      bundle([{ role: "assistant", text: "remote turn" }]),
+      bundle("s_remote", [{ role: "assistant", text: "remote turn" }]),
       REMOTE_HOST,
       "2026-05-20T10:00:00.000Z",
     );
@@ -106,7 +107,7 @@ test("does not re-import an envelope older than lastSeenRemoteUploadedAt", async
       lastSeenRemoteBy: REMOTE_HOST,
     });
     const env = envelopeFor(
-      bundle(),
+      bundle("s_remote"),
       REMOTE_HOST,
       "2026-05-20T10:00:00.000Z",
     );
@@ -121,22 +122,57 @@ test("does not re-import an envelope older than lastSeenRemoteUploadedAt", async
   }
 });
 
-test("self-loop suppression: own host + matching hash is skipped", async () => {
+test("self-loop suppression: envelope whose sessionId is local is skipped", async () => {
+  // The signal that catches "our own upload echoing back": the bundle's
+  // inner sessionId is already in the daemon's session list. Survives
+  // hostname changes and racing state writes (the previous hostname/
+  // hash-based check did not — that's what caused duplicate sessions
+  // during the cold sweep).
   const f = setup();
   try {
     await f.backend.init();
     await f.state.load();
-    const b = bundle();
-    const env = envelopeFor(b, SELF_HOST, "2026-05-20T10:00:00.000Z");
-    await f.state.set(LINEAGE, {
-      lastUploadedHash: hashBundle(b),
-      lastUploadedAt: env.uploadedAt,
-    });
+    f.localSessionIds.add("s_local");
+    const env = envelopeFor(
+      bundle("s_local"),
+      REMOTE_HOST,
+      "2026-05-20T10:00:00.000Z",
+    );
     await f.backend.put(keyFor(LINEAGE), serialize(env));
 
     await f.pull.tickNow();
 
     assert.equal(f.imports.length, 0);
+  } finally {
+    f.pull.stop();
+    f.cleanup();
+  }
+});
+
+test("envelope with unknown sessionId is imported even when lineage is known", async () => {
+  // Cross-machine update: a peer imported our upload (getting a new
+  // sessionId), worked on it, and uploaded back. Lineage matches but
+  // sessionId doesn't — we must not skip this.
+  const f = setup();
+  try {
+    await f.backend.init();
+    await f.state.load();
+    f.localSessionIds.add("s_local");
+    await f.state.set(LINEAGE, {
+      lastUploadedHash: "sha256:older",
+      lastUploadedAt: "2026-05-20T09:00:00.000Z",
+    });
+    const env = envelopeFor(
+      bundle("s_peer", [{ x: 1 }]),
+      REMOTE_HOST,
+      "2026-05-20T11:00:00.000Z",
+    );
+    await f.backend.put(keyFor(LINEAGE), serialize(env));
+
+    await f.pull.tickNow();
+
+    assert.equal(f.imports.length, 1);
+    assert.equal(f.imports[0]?.session.sessionId, "s_peer");
   } finally {
     f.pull.stop();
     f.cleanup();
@@ -153,7 +189,7 @@ test("newer remote envelope re-imports even when state has an older lastSeenRemo
       lastSeenRemoteBy: REMOTE_HOST,
     });
     const env = envelopeFor(
-      bundle([{ x: 1 }]),
+      bundle("s_remote_2", [{ x: 1 }]),
       REMOTE_HOST,
       "2026-05-20T11:00:00.000Z",
     );

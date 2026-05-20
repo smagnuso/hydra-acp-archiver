@@ -85,8 +85,8 @@ test("cold sweep exports cold sessions and skips live ones", async () => {
     assert.deepEqual(exportCalls.sort(), ["s_cold1", "s_cold2"]);
     const keys = (await backend.list()).map((e) => e.key).sort();
     assert.deepEqual(keys, [
-      "hydra_lineage_s_cold1.hydra.sync",
-      "hydra_lineage_s_cold2.hydra.sync",
+      "hydra_lineage_s_cold1.hydra.archive",
+      "hydra_lineage_s_cold2.hydra.archive",
     ]);
     archive.stop();
   } finally {
@@ -178,7 +178,7 @@ test("cold sweep respects the rule fn", async () => {
       archive,
     });
     const keys = (await backend.list()).map((e) => e.key);
-    assert.deepEqual(keys, ["hydra_lineage_s_keep.hydra.sync"]);
+    assert.deepEqual(keys, ["hydra_lineage_s_keep.hydra.archive"]);
     archive.stop();
   } finally {
     await daemonStub.close();
