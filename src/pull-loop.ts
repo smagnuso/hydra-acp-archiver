@@ -1,0 +1,145 @@
+import { hostname } from "node:os";
+import type { SyncBackend } from "./backend/types.js";
+import type { DaemonClient } from "./daemon.js";
+import { deserialize, type SyncEnvelope } from "./envelope.js";
+import type { SyncState } from "./state.js";
+import { logger } from "./util/log.js";
+
+const log = logger("pull");
+
+export interface PullLoopOptions {
+  daemon: DaemonClient;
+  backend: SyncBackend;
+  state: SyncState;
+  intervalMs: number;
+  host?: string;
+}
+
+export class PullLoop {
+  private readonly host: string;
+  private timer: NodeJS.Timeout | undefined;
+  private stopped = false;
+  private inFlight = false;
+
+  constructor(private readonly opts: PullLoopOptions) {
+    this.host = opts.host ?? safeHostname();
+  }
+
+  start(): void {
+    log.info(
+      `polling backend every ${this.opts.intervalMs}ms for peer-uploaded bundles`,
+    );
+    void this.tick();
+    this.timer = setInterval(() => {
+      void this.tick();
+    }, this.opts.intervalMs);
+    this.timer.unref();
+  }
+
+  stop(): void {
+    this.stopped = true;
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = undefined;
+    }
+  }
+
+  // tickNow is exposed for tests to drive a single iteration on demand.
+  async tickNow(): Promise<void> {
+    await this.tick();
+  }
+
+  private async tick(): Promise<void> {
+    if (this.stopped || this.inFlight) {
+      return;
+    }
+    this.inFlight = true;
+    try {
+      const entries = await this.opts.backend.list();
+      for (const entry of entries) {
+        if (this.stopped) {
+          return;
+        }
+        await this.processEntry(entry.key).catch((err: unknown) => {
+          log.warn(
+            `processing ${entry.key} failed: ${(err as Error).message}`,
+          );
+        });
+      }
+    } catch (err) {
+      log.warn(`backend.list failed: ${(err as Error).message}`);
+    } finally {
+      this.inFlight = false;
+    }
+  }
+
+  private async processEntry(key: string): Promise<void> {
+    const raw = await this.opts.backend.get(key);
+    let envelope: SyncEnvelope;
+    try {
+      envelope = deserialize(raw);
+    } catch (err) {
+      log.warn(`malformed envelope at ${key}: ${(err as Error).message}`);
+      return;
+    }
+    const { lineageId } = envelope;
+    const local = this.opts.state.get(lineageId);
+
+    // Self-loop suppression: our own upload echoing back through the
+    // backend. We recognize it by host + matching hash.
+    if (
+      envelope.uploadedBy.host === this.host &&
+      envelope.bundleHash === local.lastUploadedHash
+    ) {
+      return;
+    }
+
+    if (
+      local.lastSeenRemoteUploadedAt !== undefined &&
+      envelope.uploadedAt <= local.lastSeenRemoteUploadedAt
+    ) {
+      return;
+    }
+
+    if (
+      typeof envelope.bundle !== "object" ||
+      envelope.bundle === null
+    ) {
+      log.warn(`envelope ${key} bundle is not an object; skipping`);
+      return;
+    }
+
+    log.info(
+      `importing lineage=${lineageId} from ${envelope.uploadedBy.host} uploadedAt=${envelope.uploadedAt}`,
+    );
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await this.opts.daemon.importBundle(envelope.bundle as any, {
+        replace: true,
+      });
+    } catch (err) {
+      log.warn(
+        `daemon import for lineage ${lineageId} failed: ${(err as Error).message}`,
+      );
+      return;
+    }
+    // Suppress the immediate re-upload that the daemon's
+    // import-induced turn_complete (if any) would trigger: we record
+    // the envelope hash as our last-uploaded hash so the archive-loop
+    // sees "no change" on the next export.
+    await this.opts.state.set(lineageId, {
+      lastSeenRemoteUploadedAt: envelope.uploadedAt,
+      lastSeenRemoteBy: envelope.uploadedBy.host,
+      lastUploadedHash: envelope.bundleHash,
+      lastUploadedAt: envelope.uploadedAt,
+    });
+  }
+}
+
+function safeHostname(): string {
+  try {
+    return hostname();
+  } catch {
+    return "unknown";
+  }
+}

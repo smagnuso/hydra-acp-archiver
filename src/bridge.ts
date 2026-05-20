@@ -1,0 +1,119 @@
+import { AcpAttach } from "./acp/attach.js";
+import type {
+  JsonRpcNotification,
+  JsonRpcRequest,
+} from "./acp/protocol.js";
+import type { ArchiveLoop, SessionMeta } from "./archive-loop.js";
+import { logger } from "./util/log.js";
+
+const log = logger("bridge");
+
+export interface BridgeOptions {
+  daemonWsUrl: string;
+  token: string;
+  sessionId: string;
+  meta: SessionMeta;
+  archive: ArchiveLoop;
+}
+
+// One bridge per discovered session. Listens to session/update for
+// turn_complete and tells the archive loop to schedule an upload.
+// session_info_update keeps the cached meta fresh so any rule logic
+// that reads title/agentId sees the latest values.
+export class ArchiverBridge {
+  private readonly attach: AcpAttach;
+  private meta: SessionMeta;
+  private stopped = false;
+
+  constructor(private readonly opts: BridgeOptions) {
+    this.meta = opts.meta;
+    this.attach = new AcpAttach({
+      sessionId: opts.sessionId,
+      daemonWsUrl: opts.daemonWsUrl,
+      token: opts.token,
+    });
+    this.opts.archive.setMeta(opts.sessionId, this.meta);
+  }
+
+  start(): void {
+    this.attach.on("notification", (n) => this.onNotification(n));
+    this.attach.on("request", (r) => this.onRequest(r));
+    this.attach.on("error", (err) => {
+      log.warn(`attach error ${this.opts.sessionId}: ${err.message}`);
+    });
+    this.attach.start();
+  }
+
+  stop(): void {
+    if (this.stopped) {
+      return;
+    }
+    this.stopped = true;
+    // Fire-and-forget a final flush so any pending debounced upload
+    // lands before we drop the session. The finalFlush method swallows
+    // errors and clears the timer + meta itself.
+    void this.opts.archive.finalFlush(this.opts.sessionId);
+    this.attach.stop();
+  }
+
+  updateMeta(meta: SessionMeta): void {
+    this.meta = meta;
+    this.opts.archive.setMeta(this.opts.sessionId, meta);
+  }
+
+  private onNotification(n: JsonRpcNotification): void {
+    if (n.method !== "session/update") {
+      return;
+    }
+    const params = (n.params ?? {}) as Record<string, unknown>;
+    const update = (params.update ?? {}) as Record<string, unknown>;
+    const kind = typeof update.sessionUpdate === "string" ? update.sessionUpdate : "";
+
+    if (kind === "session_info_update") {
+      this.applySessionInfoUpdate(update);
+    }
+
+    // turn_complete is the primary upload trigger. Any other kind of
+    // session/update is ignored — we don't want to upload after every
+    // tool call notification, just after a turn finishes.
+    if (kind === "turn_complete") {
+      this.opts.archive.markDirty(this.opts.sessionId);
+    }
+  }
+
+  private applySessionInfoUpdate(update: Record<string, unknown>): void {
+    const next: SessionMeta = { ...this.meta };
+    let changed = false;
+    if (typeof update.title === "string" && next.title !== update.title) {
+      next.title = update.title;
+      changed = true;
+    }
+    const agentId = readHydraAgentId(update._meta);
+    if (agentId !== undefined && next.agentId !== agentId) {
+      next.agentId = agentId;
+      changed = true;
+    }
+    if (changed) {
+      this.updateMeta(next);
+    }
+  }
+
+  private onRequest(r: JsonRpcRequest): void {
+    // The archiver doesn't service any client-side requests — every
+    // method gets a method-not-found reply so the daemon doesn't block
+    // waiting on us.
+    this.attach.replyError(r.id, -32601, `method not implemented: ${r.method}`);
+  }
+}
+
+function readHydraAgentId(meta: unknown): string | undefined {
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) {
+    return undefined;
+  }
+  const ns = (meta as Record<string, unknown>)["hydra-acp"];
+  if (!ns || typeof ns !== "object" || Array.isArray(ns)) {
+    return undefined;
+  }
+  const v = (ns as Record<string, unknown>).agentId;
+  return typeof v === "string" ? v : undefined;
+}

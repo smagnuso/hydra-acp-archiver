@@ -1,0 +1,176 @@
+#!/usr/bin/env node
+import { ArchiveLoop } from "./archive-loop.js";
+import { makeBackend } from "./backend/factory.js";
+import { ArchiverBridge } from "./bridge.js";
+import { runColdSweep } from "./cold-sweep.js";
+import { loadConfig, loadLoginConfig } from "./config.js";
+import { DaemonClient } from "./daemon.js";
+import { HydraDiscovery } from "./discovery.js";
+import { runGoogleLogin } from "./oauth/google.js";
+import { PullLoop } from "./pull-loop.js";
+import { DEFAULT_RULE, loadRule, type RuleFunction } from "./rule.js";
+import { SyncState } from "./state.js";
+import { logger, setDebug } from "./util/log.js";
+
+const log = logger("main");
+
+const USAGE = `usage: hydra-acp-archiver [<command>]
+
+Commands:
+  (no args)   Run as a daemon-managed extension (the daemon spawns it
+              this way automatically when registered).
+  login       Interactive Google OAuth flow — opens a browser and writes
+              the refresh token to ~/.hydra-acp/archiver-google-token.json.
+`;
+
+const TRUTHY = new Set(["1", "true", "yes", "on", "t"]);
+
+async function runLogin(): Promise<void> {
+  setDebug(TRUTHY.has((process.env.DEBUG ?? "").toLowerCase()));
+  const cfg = loadLoginConfig();
+  log.info(`credentials=${cfg.credentialsPath} token=${cfg.tokenPath}`);
+  await runGoogleLogin({
+    credentialsPath: cfg.credentialsPath,
+    tokenPath: cfg.tokenPath,
+  });
+  log.info("login complete — you can now start the archiver extension");
+}
+
+async function runExtension(): Promise<void> {
+  const config = loadConfig();
+  setDebug(config.debug);
+
+  const state = new SyncState(config.statePath);
+  await state.load();
+
+  const backend = makeBackend(config);
+  await backend.init();
+
+  const daemon = new DaemonClient({
+    daemonUrl: config.hydraDaemonUrl,
+    token: config.hydraToken,
+  });
+
+  let currentRule: RuleFunction = DEFAULT_RULE;
+  currentRule = await loadRule(config.ruleConfigPath);
+
+  const archive = new ArchiveLoop({
+    daemon,
+    backend,
+    state,
+    getRule: () => currentRule,
+    debounceMs: config.uploadDebounceMs,
+  });
+
+  const pull = new PullLoop({
+    daemon,
+    backend,
+    state,
+    intervalMs: config.pullIntervalMs,
+  });
+  pull.start();
+
+  // Backfill: archive every cold session the daemon knows about.
+  // Runs in the background so the rest of startup (discovery,
+  // bridges) doesn't block on it. Hash dedup means restarts are cheap.
+  void runColdSweep({
+    daemonUrl: config.hydraDaemonUrl,
+    token: config.hydraToken,
+    archive,
+  }).catch((err: unknown) => {
+    log.warn(`cold sweep failed: ${(err as Error).message}`);
+  });
+
+  const bridges = new Map<string, ArchiverBridge>();
+
+  const discovery = new HydraDiscovery({
+    daemonUrl: config.hydraDaemonUrl,
+    token: config.hydraToken,
+    pollIntervalMs: config.hydraPollIntervalMs,
+    onAdd: (session) => {
+      if (bridges.has(session.sessionId)) {
+        return;
+      }
+      log.info(
+        `attaching to ${session.sessionId} agent=${session.agentId ?? "?"} cwd=${session.cwd}`,
+      );
+      const bridge = new ArchiverBridge({
+        daemonWsUrl: config.hydraWsUrl,
+        token: config.hydraToken,
+        sessionId: session.sessionId,
+        meta: {
+          ...(session.cwd !== undefined ? { cwd: session.cwd } : {}),
+          ...(session.agentId !== undefined
+            ? { agentId: session.agentId }
+            : {}),
+          ...(session.title !== undefined ? { title: session.title } : {}),
+        },
+        archive,
+      });
+      bridges.set(session.sessionId, bridge);
+      bridge.start();
+    },
+    onRemove: (sessionId) => {
+      const bridge = bridges.get(sessionId);
+      if (!bridge) {
+        return;
+      }
+      log.info(`detaching from ${sessionId}`);
+      bridges.delete(sessionId);
+      bridge.stop();
+    },
+  });
+  discovery.start();
+
+  process.on("SIGHUP", () => {
+    log.info(`SIGHUP — reloading rule from ${config.ruleConfigPath}`);
+    loadRule(config.ruleConfigPath)
+      .then((rule) => {
+        currentRule = rule;
+        log.info("rule reload complete");
+      })
+      .catch((err: unknown) => {
+        log.warn(`rule reload failed: ${(err as Error).message}`);
+      });
+  });
+
+  const shutdown = (sig: string): void => {
+    log.info(`${sig} received — shutting down`);
+    discovery.stop();
+    pull.stop();
+    archive.stop();
+    for (const bridge of bridges.values()) {
+      bridge.stop();
+    }
+    setTimeout(() => process.exit(0), 200).unref();
+  };
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+
+  log.info(
+    `hydra-acp-archiver up; daemon=${config.hydraDaemonUrl} backend=${config.backend} rule=${config.ruleConfigPath}`,
+  );
+}
+
+async function main(): Promise<void> {
+  const cmd = process.argv[2];
+  if (cmd === undefined) {
+    await runExtension();
+    return;
+  }
+  if (cmd === "login") {
+    await runLogin();
+    return;
+  }
+  if (cmd === "-h" || cmd === "--help" || cmd === "help") {
+    process.stdout.write(USAGE);
+    return;
+  }
+  process.stderr.write(`hydra-acp-archiver: unknown command "${cmd}"\n\n${USAGE}`);
+  process.exit(2);
+}
+
+main().catch((err) => {
+  process.stderr.write(`hydra-acp-archiver: ${(err as Error).message}\n`);
+  process.exit(1);
+});
