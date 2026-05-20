@@ -99,10 +99,13 @@ export class ArchiverBridge {
   }
 
   private onRequest(r: JsonRpcRequest): void {
-    // The archiver doesn't service any client-side requests — every
-    // method gets a method-not-found reply so the daemon doesn't block
-    // waiting on us.
-    this.attach.replyError(r.id, -32601, `method not implemented: ${r.method}`);
+    // The hydra-acp daemon broadcasts agent→client requests to every
+    // attached client and resolves the original on the first response
+    // (first-responder-wins). A passive observer like the archiver
+    // MUST stay silent on methods it doesn't intend to answer —
+    // replying -32601 would race the real client and make permission
+    // prompts / fs reads etc. resolve to an error. Just log and drop.
+    log.debug(`ignoring inbound request ${r.method} id=${String(r.id)}`);
   }
 }
 
