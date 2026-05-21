@@ -10,6 +10,12 @@ export interface HydraSessionInfo {
   attachedClients: number;
   updatedAt: string;
   status: "live" | "cold";
+  // Provenance. When importedFromMachine is set and upstreamSessionId is
+  // empty the session is a passive mirror — pulled from a peer, never
+  // opened locally. Re-uploading it would ping-pong, so the cold sweep
+  // and any future export paths must skip it.
+  importedFromMachine?: string;
+  upstreamSessionId?: string;
 }
 
 export interface HydraDiscoveryOptions {

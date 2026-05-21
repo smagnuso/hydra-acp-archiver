@@ -21,11 +21,20 @@ export interface ColdSweepOptions {
 // are logged and skipped — partial progress is preferable to bailing.
 export async function runColdSweep(
   opts: ColdSweepOptions,
-): Promise<{ scanned: number; cold: number }> {
+): Promise<{ scanned: number; cold: number; skippedMirrors: number }> {
   const sessions = await listSessions(opts.daemonUrl, opts.token);
   let cold = 0;
+  let skippedMirrors = 0;
   for (const s of sessions) {
     if (s.status === "live") {
+      continue;
+    }
+    // Passive mirror: imported from a peer, never opened locally. No
+    // upstreamSessionId means no local agent has bound it, so this
+    // machine has nothing to contribute. Re-exporting would just
+    // ping-pong the bundle back to the peer.
+    if (s.importedFromMachine && !s.upstreamSessionId) {
+      skippedMirrors += 1;
       continue;
     }
     cold += 1;
@@ -42,8 +51,10 @@ export async function runColdSweep(
       );
     }
   }
-  log.info(`cold sweep done: scanned=${sessions.length} cold=${cold}`);
-  return { scanned: sessions.length, cold };
+  log.info(
+    `cold sweep done: scanned=${sessions.length} cold=${cold} skipped-mirrors=${skippedMirrors}`,
+  );
+  return { scanned: sessions.length, cold, skippedMirrors };
 }
 
 async function listSessions(
