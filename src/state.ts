@@ -67,6 +67,28 @@ export class SyncState {
     return this.flush();
   }
 
+  // Drop any lineage entry whose key isn't present on the backend.
+  // Called once at startup so that a wiped backend (Drive nuke, retention
+  // delete, etc.) doesn't leave us with stale "I already uploaded" beliefs
+  // — the next flush re-uploads from scratch. State stays a hint cache;
+  // the backend stays the source of truth.
+  async reconcile(presentLineageIds: Set<string>): Promise<number> {
+    if (!this.cache) {
+      throw new Error("SyncState.reconcile called before load()");
+    }
+    let pruned = 0;
+    for (const id of Object.keys(this.cache.lineages)) {
+      if (!presentLineageIds.has(id)) {
+        delete this.cache.lineages[id];
+        pruned += 1;
+      }
+    }
+    if (pruned > 0) {
+      await this.flush();
+    }
+    return pruned;
+  }
+
   private flush(): Promise<void> {
     const snapshot = JSON.stringify(this.cache, null, 2);
     const next = this.writeChain.then(async () => {

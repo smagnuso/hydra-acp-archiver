@@ -6,6 +6,7 @@ import { runColdSweep } from "./cold-sweep.js";
 import { loadConfig, loadLoginConfig } from "./config.js";
 import { DaemonClient } from "./daemon.js";
 import { HydraDiscovery } from "./discovery.js";
+import { lineageFromKey } from "./envelope.js";
 import { runGoogleLogin } from "./oauth/google.js";
 import { PullLoop } from "./pull-loop.js";
 import { DEFAULT_RULE, loadRule, type RuleFunction } from "./rule.js";
@@ -45,6 +46,31 @@ async function runExtension(): Promise<void> {
 
   const backend = makeBackend(config);
   await backend.init();
+
+  // Reconcile state.json with what's actually on the backend. Without
+  // this a wiped backend (manual nuke, retention delete, expired share)
+  // leaves us believing every lineage is "already uploaded" — the hash
+  // skip in archive-loop never fires a re-upload and the user wonders
+  // why nothing flooded in. One list call at startup makes state a
+  // hint-cache instead of a source of truth.
+  try {
+    const entries = await backend.list();
+    const presentLineages = new Set<string>();
+    for (const e of entries) {
+      const id = lineageFromKey(e.key);
+      if (id !== undefined) {
+        presentLineages.add(id);
+      }
+    }
+    const pruned = await state.reconcile(presentLineages);
+    log.info(
+      `reconciled state with backend: present=${presentLineages.size} pruned=${pruned}`,
+    );
+  } catch (err) {
+    log.warn(
+      `state reconcile skipped — backend list failed: ${(err as Error).message}`,
+    );
+  }
 
   const daemon = new DaemonClient({
     daemonUrl: config.hydraDaemonUrl,

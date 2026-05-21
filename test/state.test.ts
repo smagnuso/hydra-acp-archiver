@@ -81,6 +81,43 @@ test("set merges keys rather than replacing the lineage record", async () => {
   }
 });
 
+test("reconcile prunes lineages absent from the backend snapshot", async () => {
+  const { path, cleanup } = tmpStatePath();
+  try {
+    const s = new SyncState(path);
+    await s.load();
+    await s.set("present_a", { lastUploadedHash: "sha256:a" });
+    await s.set("present_b", { lastUploadedHash: "sha256:b" });
+    await s.set("gone", { lastUploadedHash: "sha256:gone" });
+    const pruned = await s.reconcile(new Set(["present_a", "present_b"]));
+    assert.equal(pruned, 1);
+    assert.deepEqual(s.get("present_a"), { lastUploadedHash: "sha256:a" });
+    assert.deepEqual(s.get("present_b"), { lastUploadedHash: "sha256:b" });
+    assert.deepEqual(s.get("gone"), {});
+
+    const reloaded = new SyncState(path);
+    await reloaded.load();
+    assert.deepEqual(reloaded.get("gone"), {});
+    assert.equal(reloaded.get("present_a").lastUploadedHash, "sha256:a");
+  } finally {
+    cleanup();
+  }
+});
+
+test("reconcile is a no-op when nothing needs pruning", async () => {
+  const { path, cleanup } = tmpStatePath();
+  try {
+    const s = new SyncState(path);
+    await s.load();
+    await s.set("l", { lastUploadedHash: "sha256:1" });
+    const pruned = await s.reconcile(new Set(["l"]));
+    assert.equal(pruned, 0);
+    assert.equal(s.get("l").lastUploadedHash, "sha256:1");
+  } finally {
+    cleanup();
+  }
+});
+
 test("writes go through a tmp+rename so the file is never partial", async () => {
   const { path, cleanup } = tmpStatePath();
   try {

@@ -4,6 +4,7 @@ import {
   deserialize,
   hashBundle,
   keyFor,
+  lineageFromKey,
   serialize,
   unwrap,
   wrap,
@@ -145,4 +146,10 @@ test("unwrap rejects missing required fields", () => {
 
 test("keyFor produces expected filename", () => {
   assert.equal(keyFor(LINEAGE), `${LINEAGE}.hydra.archive`);
+});
+
+test("lineageFromKey reverses keyFor and ignores unrelated keys", () => {
+  assert.equal(lineageFromKey(keyFor(LINEAGE)), LINEAGE);
+  assert.equal(lineageFromKey("some-random-file.txt"), undefined);
+  assert.equal(lineageFromKey(""), undefined);
 });

@@ -144,3 +144,14 @@ export function deserialize(data: Buffer | string): SyncEnvelope {
 export function keyFor(lineageId: string): string {
   return `${lineageId}.hydra.archive`;
 }
+
+const KEY_SUFFIX = ".hydra.archive";
+
+// Reverse of keyFor — returns undefined for unrelated keys so callers
+// can safely iterate a mixed backend listing.
+export function lineageFromKey(key: string): string | undefined {
+  if (!key.endsWith(KEY_SUFFIX)) {
+    return undefined;
+  }
+  return key.slice(0, -KEY_SUFFIX.length);
+}
