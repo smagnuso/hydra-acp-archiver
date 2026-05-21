@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { ArchiveLoop } from "./archive-loop.js";
 import { makeBackend } from "./backend/factory.js";
 import { ArchiverBridge } from "./bridge.js";
@@ -22,7 +25,23 @@ Commands:
               this way automatically when registered).
   login       Interactive Google OAuth flow — opens a browser and writes
               the refresh token to ~/.hydra-acp/archiver-google-token.json.
+
+Flags:
+  --version, -v   Print version and exit.
+  --help, -h      Show this message.
 `;
+
+function readVersion(): string {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const pkg = JSON.parse(
+      readFileSync(resolve(here, "../package.json"), "utf8"),
+    ) as { version?: string };
+    return pkg.version ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+}
 
 const TRUTHY = new Set(["1", "true", "yes", "on", "t"]);
 
@@ -180,6 +199,10 @@ async function runExtension(): Promise<void> {
 
 async function main(): Promise<void> {
   const cmd = process.argv[2];
+  if (cmd === "-v" || cmd === "--version") {
+    process.stdout.write(`hydra-acp-archiver ${readVersion()}\n`);
+    return;
+  }
   if (cmd === undefined) {
     await runExtension();
     return;
