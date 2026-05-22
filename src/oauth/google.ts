@@ -84,22 +84,31 @@ async function saveToken(path: string, token: StoredToken): Promise<void> {
 }
 
 function tryOpenBrowser(url: string): void {
-  const candidates: { cmd: string; args: string[] }[] = [
-    { cmd: "xdg-open", args: [url] },
-    { cmd: "open", args: [url] },
-    { cmd: "cmd", args: ["/c", "start", "", url] },
-  ];
-  for (const { cmd, args } of candidates) {
-    try {
-      const child = spawn(cmd, args, { stdio: "ignore", detached: true });
-      child.on("error", () => void 0);
-      child.unref();
-      return;
-    } catch {
-      // try next
-    }
+  let cmd: string;
+  let args: string[];
+  switch (process.platform) {
+    case "darwin":
+      cmd = "open";
+      args = [url];
+      break;
+    case "win32":
+      cmd = "cmd";
+      args = ["/c", "start", "", url];
+      break;
+    default:
+      cmd = "xdg-open";
+      args = [url];
+      break;
   }
-  log.info("could not auto-open browser; copy the URL above into a browser");
+  try {
+    const child = spawn(cmd, args, { stdio: "ignore", detached: true });
+    child.on("error", () => {
+      log.info("could not auto-open browser; copy the URL above into a browser");
+    });
+    child.unref();
+  } catch {
+    log.info("could not auto-open browser; copy the URL above into a browser");
+  }
 }
 
 export interface GoogleAuthOptions {
