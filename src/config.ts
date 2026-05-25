@@ -45,6 +45,12 @@ function confPath(hydraHome: string): string {
   return process.env.HYDRA_ACP_ARCHIVER_CONF ?? resolve(hydraHome, "archiver.conf");
 }
 
+function expandTilde(val: string): string {
+  if (val === "~" || val.startsWith("~/"))
+    return homedir() + val.slice(1);
+  return val;
+}
+
 function parseConfFile(text: string): Map<string, string> {
   const out = new Map<string, string>();
   for (const rawLine of text.split(/\r?\n/)) {
@@ -61,7 +67,7 @@ function parseConfFile(text: string): Map<string, string> {
       (val.startsWith("'") && val.endsWith("'"))
     )
       val = val.slice(1, -1);
-    out.set(key, val);
+    out.set(key, expandTilde(val));
   }
   return out;
 }
