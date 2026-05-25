@@ -76,7 +76,7 @@ test("imports a fresh remote envelope and updates state", async () => {
   const f = setup();
   try {
     await f.backend.init();
-    await f.state.load("", "fs");
+    await f.state.load("0.0.0", "", "fs");
     const env = envelopeFor(
       bundle("s_remote", [{ role: "assistant", text: "remote turn" }]),
       REMOTE_HOST,
@@ -102,7 +102,7 @@ test("does not re-import an envelope older than lastSeenRemoteUploadedAt", async
   const f = setup();
   try {
     await f.backend.init();
-    await f.state.load("", "fs");
+    await f.state.load("0.0.0", "", "fs");
     await f.state.set(LINEAGE, {
       lastSeenRemoteUploadedAt: "2026-05-20T12:00:00.000Z",
       lastSeenRemoteBy: REMOTE_HOST,
@@ -132,7 +132,7 @@ test("self-loop suppression: envelope whose sessionId is local is skipped", asyn
   const f = setup();
   try {
     await f.backend.init();
-    await f.state.load("", "fs");
+    await f.state.load("0.0.0", "", "fs");
     f.localSessionIds.add("s_local");
     const env = envelopeFor(
       bundle("s_local"),
@@ -157,7 +157,7 @@ test("envelope with unknown sessionId is imported even when lineage is known", a
   const f = setup();
   try {
     await f.backend.init();
-    await f.state.load("", "fs");
+    await f.state.load("0.0.0", "", "fs");
     f.localSessionIds.add("s_local");
     await f.state.set(LINEAGE, {
       lastUploadedHash: "sha256:older",
@@ -184,7 +184,7 @@ test("newer remote envelope re-imports even when state has an older lastSeenRemo
   const f = setup();
   try {
     await f.backend.init();
-    await f.state.load("", "fs");
+    await f.state.load("0.0.0", "", "fs");
     await f.state.set(LINEAGE, {
       lastSeenRemoteUploadedAt: "2026-05-20T09:00:00.000Z",
       lastSeenRemoteBy: REMOTE_HOST,
@@ -210,7 +210,7 @@ test("malformed envelope is skipped without throwing", async () => {
   const f = setup();
   try {
     await f.backend.init();
-    await f.state.load("", "fs");
+    await f.state.load("0.0.0", "", "fs");
     await f.backend.put(
       keyFor(LINEAGE),
       Buffer.from("not valid json", "utf8"),
@@ -229,7 +229,7 @@ test("own-host entries are skipped without being imported", async () => {
   const f = setup();
   try {
     await f.backend.init();
-    await f.state.load("", "fs");
+    await f.state.load("0.0.0", "", "fs");
 
     const PEER_LINEAGE = "hydra_lineage_peer_0001";
     const ownKey = `local-host/${keyFor(LINEAGE)}`;
@@ -254,6 +254,64 @@ test("own-host entries are skipped without being imported", async () => {
       (f.imports[0] as { session?: { sessionId?: string } }).session?.sessionId,
       "peer-session",
     );
+  } finally {
+    f.pull.stop();
+    f.cleanup();
+  }
+});
+
+test("deleted imported session is re-imported on next tick", async () => {
+  const f = setup();
+  try {
+    await f.backend.init();
+    await f.state.load("0.0.0", "", "fs");
+
+    const env = envelopeFor(
+      bundle("s_remote"),
+      REMOTE_HOST,
+      "2026-05-20T10:00:00.000Z",
+    );
+    await f.backend.put(keyFor(LINEAGE), serialize(env));
+
+    // First tick — imports the session, records importedSessionId
+    await f.pull.tickNow();
+    assert.equal(f.imports.length, 1);
+    assert.equal(f.state.get(LINEAGE).importedSessionId, "s_remote");
+
+    // Simulate user deleting the session (no longer in localSessionIds)
+    // Second tick — detects deletion, resets pull state, re-imports
+    await f.pull.tickNow();
+    assert.equal(f.imports.length, 2);
+    assert.equal(f.state.get(LINEAGE).importedSessionId, "s_remote");
+  } finally {
+    f.pull.stop();
+    f.cleanup();
+  }
+});
+
+test("imported session still present is not re-imported", async () => {
+  const f = setup();
+  try {
+    await f.backend.init();
+    await f.state.load("0.0.0", "", "fs");
+
+    const env = envelopeFor(
+      bundle("s_remote"),
+      REMOTE_HOST,
+      "2026-05-20T10:00:00.000Z",
+    );
+    await f.backend.put(keyFor(LINEAGE), serialize(env));
+
+    // First tick — imports
+    await f.pull.tickNow();
+    assert.equal(f.imports.length, 1);
+
+    // Session is still present locally
+    f.localSessionIds.add("s_remote");
+
+    // Second tick — session present, should NOT re-import
+    await f.pull.tickNow();
+    assert.equal(f.imports.length, 1);
   } finally {
     f.pull.stop();
     f.cleanup();

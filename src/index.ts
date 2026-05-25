@@ -80,7 +80,7 @@ async function runExtension(): Promise<void> {
   }
 
   const state = new SyncState(config.statePath);
-  await state.load(config.prefix, config.backend);
+  await state.load(readVersion(), config.prefix, config.backend);
 
   function buildBackend(prefix: string): SyncBackend {
     const raw = makeBackend({ ...config, prefix });

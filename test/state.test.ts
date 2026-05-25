@@ -17,7 +17,7 @@ test("load creates empty state when file missing", async () => {
   const { path, cleanup } = tmpStatePath();
   try {
     const s = new SyncState(path);
-    await s.load("", "fs");
+    await s.load("0.0.0", "", "fs");
     assert.deepEqual(s.get("anything"), {});
   } finally {
     cleanup();
@@ -28,14 +28,14 @@ test("set persists and re-load reads back", async () => {
   const { path, cleanup } = tmpStatePath();
   try {
     const a = new SyncState(path);
-    await a.load("", "fs");
+    await a.load("0.0.0", "", "fs");
     await a.set("lineage1", {
       lastUploadedHash: "sha256:abc",
       lastUploadedAt: "2026-05-20T00:00:00.000Z",
     });
 
     const b = new SyncState(path);
-    await b.load("", "fs");
+    await b.load("0.0.0", "", "fs");
     assert.deepEqual(b.get("lineage1"), {
       lastUploadedHash: "sha256:abc",
       lastUploadedAt: "2026-05-20T00:00:00.000Z",
@@ -49,14 +49,14 @@ test("concurrent set calls are serialized without losing data", async () => {
   const { path, cleanup } = tmpStatePath();
   try {
     const s = new SyncState(path);
-    await s.load("", "fs");
+    await s.load("0.0.0", "", "fs");
     await Promise.all([
       s.set("a", { lastUploadedHash: "sha256:a" }),
       s.set("b", { lastUploadedHash: "sha256:b" }),
       s.set("c", { lastUploadedHash: "sha256:c" }),
     ]);
     const reloaded = new SyncState(path);
-    await reloaded.load("", "fs");
+    await reloaded.load("0.0.0", "", "fs");
     assert.equal(reloaded.get("a").lastUploadedHash, "sha256:a");
     assert.equal(reloaded.get("b").lastUploadedHash, "sha256:b");
     assert.equal(reloaded.get("c").lastUploadedHash, "sha256:c");
@@ -69,7 +69,7 @@ test("set merges keys rather than replacing the lineage record", async () => {
   const { path, cleanup } = tmpStatePath();
   try {
     const s = new SyncState(path);
-    await s.load("", "fs");
+    await s.load("0.0.0", "", "fs");
     await s.set("l", { lastUploadedHash: "sha256:1" });
     await s.set("l", { lastSeenRemoteUploadedAt: "2026-05-20T00:00:00.000Z" });
     assert.deepEqual(s.get("l"), {
@@ -85,7 +85,7 @@ test("reconcile prunes lineages absent from the backend snapshot", async () => {
   const { path, cleanup } = tmpStatePath();
   try {
     const s = new SyncState(path);
-    await s.load("", "fs");
+    await s.load("0.0.0", "", "fs");
     await s.set("present_a", { lastUploadedHash: "sha256:a" });
     await s.set("present_b", { lastUploadedHash: "sha256:b" });
     await s.set("gone", { lastUploadedHash: "sha256:gone" });
@@ -96,7 +96,7 @@ test("reconcile prunes lineages absent from the backend snapshot", async () => {
     assert.deepEqual(s.get("gone"), {});
 
     const reloaded = new SyncState(path);
-    await reloaded.load("", "fs");
+    await reloaded.load("0.0.0", "", "fs");
     assert.deepEqual(reloaded.get("gone"), {});
     assert.equal(reloaded.get("present_a").lastUploadedHash, "sha256:a");
   } finally {
@@ -108,7 +108,7 @@ test("reconcile is a no-op when nothing needs pruning", async () => {
   const { path, cleanup } = tmpStatePath();
   try {
     const s = new SyncState(path);
-    await s.load("", "fs");
+    await s.load("0.0.0", "", "fs");
     await s.set("l", { lastUploadedHash: "sha256:1" });
     const pruned = await s.reconcile(new Set(["l"]));
     assert.equal(pruned, 0);
@@ -122,12 +122,12 @@ test("writes go through a tmp+rename so the file is never partial", async () => 
   const { path, cleanup } = tmpStatePath();
   try {
     const s = new SyncState(path);
-    await s.load("", "fs");
+    await s.load("0.0.0", "", "fs");
     await s.set("l", { lastUploadedHash: "sha256:1" });
     assert.equal(existsSync(`${path}.tmp`), false);
     const content = readFileSync(path, "utf8");
     const parsed = JSON.parse(content);
-    assert.equal(parsed.version, 1);
+    assert.equal(parsed.appVersion, "0.0.0");
     assert.equal(parsed.lineages.l.lastUploadedHash, "sha256:1");
   } finally {
     cleanup();
@@ -138,7 +138,7 @@ test("prefix change clears lastSeenRemoteUploadedAt but preserves upload hashes"
   const { path, cleanup } = tmpStatePath();
   try {
     const s = new SyncState(path);
-    await s.load("prefix-a/", "fs");
+    await s.load("0.0.0", "prefix-a/", "fs");
     await s.set("l1", {
       lastUploadedHash: "sha256:abc",
       lastUploadedAt: "2026-05-20T10:00:00.000Z",
@@ -148,7 +148,7 @@ test("prefix change clears lastSeenRemoteUploadedAt but preserves upload hashes"
 
     // Reload with a different prefix — pull state should be wiped, upload state kept
     const s2 = new SyncState(path);
-    await s2.load("prefix-b/", "fs");
+    await s2.load("0.0.0", "prefix-b/", "fs");
     const entry = s2.get("l1");
     assert.equal(entry.lastSeenRemoteUploadedAt, undefined);
     assert.equal(entry.lastSeenRemoteBy, undefined);
@@ -163,7 +163,7 @@ test("same prefix on reload preserves all state including pull timestamps", asyn
   const { path, cleanup } = tmpStatePath();
   try {
     const s = new SyncState(path);
-    await s.load("prefix-a/", "fs");
+    await s.load("0.0.0", "prefix-a/", "fs");
     await s.set("l1", {
       lastUploadedHash: "sha256:abc",
       lastSeenRemoteUploadedAt: "2026-05-20T09:00:00.000Z",
@@ -171,7 +171,7 @@ test("same prefix on reload preserves all state including pull timestamps", asyn
     });
 
     const s2 = new SyncState(path);
-    await s2.load("prefix-a/", "fs");
+    await s2.load("0.0.0", "prefix-a/", "fs");
     const entry = s2.get("l1");
     assert.equal(entry.lastSeenRemoteUploadedAt, "2026-05-20T09:00:00.000Z");
     assert.equal(entry.lastSeenRemoteBy, "other-host");
@@ -185,7 +185,7 @@ test("backend change clears lastSeenRemoteUploadedAt but preserves upload hashes
   const { path, cleanup } = tmpStatePath();
   try {
     const s = new SyncState(path);
-    await s.load("prefix/", "google-drive");
+    await s.load("0.0.0", "prefix/", "google-drive");
     await s.set("l1", {
       lastUploadedHash: "sha256:abc",
       lastSeenRemoteUploadedAt: "2026-05-20T09:00:00.000Z",
@@ -193,10 +193,34 @@ test("backend change clears lastSeenRemoteUploadedAt but preserves upload hashes
     });
 
     const s2 = new SyncState(path);
-    await s2.load("prefix/", "s3");
+    await s2.load("0.0.0", "prefix/", "s3");
     const entry = s2.get("l1");
     assert.equal(entry.lastSeenRemoteUploadedAt, undefined);
     assert.equal(entry.lastSeenRemoteBy, undefined);
+    assert.equal(entry.lastUploadedHash, "sha256:abc");
+  } finally {
+    cleanup();
+  }
+});
+
+test("app version change clears pull state but preserves upload hashes", async () => {
+  const { path, cleanup } = tmpStatePath();
+  try {
+    const s = new SyncState(path);
+    await s.load("0.1.10", "prefix/", "google-drive");
+    await s.set("l1", {
+      lastUploadedHash: "sha256:abc",
+      lastSeenRemoteUploadedAt: "2026-05-20T09:00:00.000Z",
+      lastSeenRemoteBy: "other-host",
+      importedSessionId: "s_peer",
+    });
+
+    const s2 = new SyncState(path);
+    await s2.load("0.1.11", "prefix/", "google-drive");
+    const entry = s2.get("l1");
+    assert.equal(entry.lastSeenRemoteUploadedAt, undefined);
+    assert.equal(entry.lastSeenRemoteBy, undefined);
+    assert.equal(entry.importedSessionId, undefined);
     assert.equal(entry.lastUploadedHash, "sha256:abc");
   } finally {
     cleanup();

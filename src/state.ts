@@ -9,17 +9,23 @@ export interface LineageState {
   lastUploadedAt?: string;
   lastSeenRemoteUploadedAt?: string;
   lastSeenRemoteBy?: string;
+  // Session ID assigned by the daemon when we imported this lineage from a peer.
+  // Cleared when that session is deleted, triggering an automatic re-import.
+  importedSessionId?: string;
 }
 
 interface StateFile {
-  version: 1;
+  // App version string from package.json. Pull state is reset whenever
+  // this changes so every upgrade starts with a clean import slate.
+  // Upload hashes are always preserved across upgrades.
+  appVersion: string;
   prefix: string;
   backend: string;
   lineages: Record<string, LineageState>;
 }
 
-function emptyState(prefix: string, backend: string): StateFile {
-  return { version: 1, prefix, backend, lineages: {} };
+function emptyState(appVersion: string, prefix: string, backend: string): StateFile {
+  return { appVersion, prefix, backend, lineages: {} };
 }
 
 // All writes go through a single in-process queue so concurrent
@@ -32,38 +38,52 @@ export class SyncState {
 
   constructor(private readonly path: string) {}
 
-  async load(prefix: string, backend: string): Promise<void> {
+  async load(appVersion: string, prefix: string, backend: string): Promise<void> {
     try {
       const text = await readFile(this.path, "utf8");
       const parsed = JSON.parse(text) as StateFile;
-      if (parsed.version !== 1 || !parsed.lineages) {
+      if (!parsed.lineages) {
         log.warn(`state file at ${this.path} had unexpected shape; ignoring`);
-        this.cache = emptyState(prefix, backend);
+        this.cache = emptyState(appVersion, prefix, backend);
         return;
       }
+      const storedVersion = parsed.appVersion;
       const storedPrefix = parsed.prefix;
       const storedBackend = parsed.backend;
       this.cache = parsed;
+      this.cache.appVersion = appVersion;
       this.cache.prefix = prefix;
       this.cache.backend = backend;
-      if (storedPrefix !== prefix || storedBackend !== backend) {
-        log.info(
-          `namespace changed (${storedBackend ?? "?"}:${storedPrefix ?? "none"} → ${backend}:${prefix}); resetting pull state`,
-        );
+
+      const versionChanged = storedVersion !== appVersion;
+      const namespaceChanged = storedPrefix !== prefix || storedBackend !== backend;
+
+      if (versionChanged || namespaceChanged) {
+        if (versionChanged) {
+          log.info(
+            `version changed (${storedVersion ?? "?"} → ${appVersion}); resetting pull state`,
+          );
+        }
+        if (namespaceChanged) {
+          log.info(
+            `namespace changed (${storedBackend ?? "?"}:${storedPrefix ?? "none"} → ${backend}:${prefix}); resetting pull state`,
+          );
+        }
         for (const entry of Object.values(this.cache.lineages)) {
           delete entry.lastSeenRemoteUploadedAt;
           delete entry.lastSeenRemoteBy;
+          delete entry.importedSessionId;
         }
         await this.flush();
       }
     } catch (err) {
       const e = err as NodeJS.ErrnoException;
       if (e.code === "ENOENT") {
-        this.cache = emptyState(prefix, backend);
+        this.cache = emptyState(appVersion, prefix, backend);
         return;
       }
       log.warn(`failed to read ${this.path}: ${e.message}; starting fresh`);
-      this.cache = emptyState(prefix, backend);
+      this.cache = emptyState(appVersion, prefix, backend);
     }
   }
 
@@ -80,6 +100,25 @@ export class SyncState {
     }
     const prev = this.cache.lineages[lineageId] ?? {};
     this.cache.lineages[lineageId] = { ...prev, ...patch };
+    return this.flush();
+  }
+
+  lineageIds(): string[] {
+    if (!this.cache)
+      throw new Error("SyncState.lineageIds called before load()");
+    return Object.keys(this.cache.lineages);
+  }
+
+  // Clear pull-side state for a lineage whose imported session was deleted,
+  // so the pull loop will treat the next peer envelope as unseen.
+  async resetImport(lineageId: string): Promise<void> {
+    if (!this.cache)
+      throw new Error("SyncState.resetImport called before load()");
+    const entry = this.cache.lineages[lineageId];
+    if (!entry) return;
+    delete entry.lastSeenRemoteUploadedAt;
+    delete entry.lastSeenRemoteBy;
+    delete entry.importedSessionId;
     return this.flush();
   }
 

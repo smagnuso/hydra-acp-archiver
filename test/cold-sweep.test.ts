@@ -61,7 +61,7 @@ test("cold sweep exports cold sessions and skips live ones", async () => {
     await backend.init();
     const { SyncState } = await import("../src/state.js");
     const state = new SyncState(join(dir, "state.json"));
-    await state.load("", "fs");
+    await state.load("0.0.0", "", "fs");
     const exportCalls: string[] = [];
     const daemon: Partial<DaemonClient> = {
       exportSession: async (sessionId: string) => {
@@ -108,7 +108,7 @@ test("cold sweep is idempotent — second run uploads nothing new", async () => 
     await backend.init();
     const { SyncState } = await import("../src/state.js");
     const state = new SyncState(join(dir, "state.json"));
-    await state.load("", "fs");
+    await state.load("0.0.0", "", "fs");
     let puts = 0;
     const sniffBackend: typeof backend = Object.assign(
       Object.create(Object.getPrototypeOf(backend) as object),
@@ -178,7 +178,7 @@ test("cold sweep skips passive mirrors but exports locally-bound imports", async
     await backend.init();
     const { SyncState } = await import("../src/state.js");
     const state = new SyncState(join(dir, "state.json"));
-    await state.load("", "fs");
+    await state.load("0.0.0", "", "fs");
     const exportCalls: string[] = [];
     const daemon: Partial<DaemonClient> = {
       exportSession: async (sessionId: string) => {
@@ -226,7 +226,7 @@ test("cold sweep respects the rule fn", async () => {
     await backend.init();
     const { SyncState } = await import("../src/state.js");
     const state = new SyncState(join(dir, "state.json"));
-    await state.load("", "fs");
+    await state.load("0.0.0", "", "fs");
     const daemon: Partial<DaemonClient> = {
       exportSession: async (sessionId: string) =>
         fakeBundle(sessionId, `hydra_lineage_${sessionId}`),

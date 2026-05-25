@@ -76,7 +76,7 @@ test("flushNow exports the session, uploads, and records hash in state", async (
   const f = fixture();
   try {
     await f.backend.init();
-    await f.state.load("", "fs");
+    await f.state.load("0.0.0", "", "fs");
     await f.loop.flushNow("s1");
     const entries = await f.backend.list();
     assert.equal(entries.length, 1);
@@ -94,7 +94,7 @@ test("identical bundle on second flush skips the upload", async () => {
   const f = fixture();
   try {
     await f.backend.init();
-    await f.state.load("", "fs");
+    await f.state.load("0.0.0", "", "fs");
     await f.loop.flushNow("s1");
     const firstHash = f.state.get(LINEAGE).lastUploadedHash;
     const firstUploadedAt = f.state.get(LINEAGE).lastUploadedAt;
@@ -117,7 +117,7 @@ test("debounce collapses bursts into one upload", async () => {
     const backend = new FsBackend({ dir: join(dir, "backend"), prefix: "" });
     await backend.init();
     const state = new SyncState(join(dir, "state.json"));
-    await state.load("", "fs");
+    await state.load("0.0.0", "", "fs");
     const daemon: Partial<DaemonClient> = {
       exportSession: async () => {
         exports += 1;
@@ -150,7 +150,7 @@ test("rule returning false skips upload", async () => {
     const backend = new FsBackend({ dir: join(dir, "backend"), prefix: "" });
     await backend.init();
     const state = new SyncState(join(dir, "state.json"));
-    await state.load("", "fs");
+    await state.load("0.0.0", "", "fs");
     const daemon: Partial<DaemonClient> = {
       exportSession: async () => fakeBundle(),
     };

@@ -61,6 +61,8 @@ export class PullLoop {
         log.warn(`session list failed; skipping tick: ${(err as Error).message}`);
         return;
       }
+      await this.resetDeletedImports(localSessionIds);
+
       const ownPrefix = this.opts.hostId + "/";
       const entries = await this.opts.backend.list();
       for (const entry of entries) {
@@ -80,6 +82,21 @@ export class PullLoop {
       log.warn(`backend.list failed: ${(err as Error).message}`);
     } finally {
       this.inFlight = false;
+    }
+  }
+
+  private async resetDeletedImports(localSessionIds: Set<string>): Promise<void> {
+    for (const lineageId of this.opts.state.lineageIds()) {
+      const entry = this.opts.state.get(lineageId);
+      if (
+        entry.importedSessionId !== undefined &&
+        !localSessionIds.has(entry.importedSessionId)
+      ) {
+        await this.opts.state.resetImport(lineageId);
+        log.info(
+          `imported session for lineage=${lineageId} was deleted; will re-import`,
+        );
+      }
     }
   }
 
@@ -127,11 +144,13 @@ export class PullLoop {
     log.info(
       `importing lineage=${lineageId} from ${envelope.uploadedBy.host} uploadedAt=${envelope.uploadedAt}`,
     );
+    let importedSessionId: string | undefined;
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await this.opts.daemon.importBundle(envelope.bundle as any, {
+      const result = await this.opts.daemon.importBundle(envelope.bundle as any, {
         replace: true,
       });
+      importedSessionId = result.sessionId;
     } catch (err) {
       log.warn(
         `daemon import for lineage ${lineageId} failed: ${(err as Error).message}`,
@@ -147,6 +166,7 @@ export class PullLoop {
       lastSeenRemoteBy: envelope.uploadedBy.host,
       lastUploadedHash: envelope.bundleHash,
       lastUploadedAt: envelope.uploadedAt,
+      importedSessionId,
     });
   }
 }
