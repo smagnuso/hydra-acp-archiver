@@ -78,7 +78,7 @@ You provide your own OAuth client (Google's terms make it impractical to ship a 
 6. Run:
 
    ```sh
-   hydra-acp-archiver login
+   hydra-acp-archiver gdrive login
    ```
 
    Your browser opens to Google's consent screen. The "Google hasn't verified this app" interstitial is expected for an unverified personal-use client — click **Advanced → Go to (unsafe)** and approve. The redirect lands on a transient local server, the archiver writes `~/.hydra-acp/archiver-google-token.json` (mode 0600), and you're done.
@@ -268,7 +268,7 @@ Return `false` to skip an upload. Any other value (including `undefined`) archiv
 ## Troubleshooting
 
 - **`Missing HYDRA_ACP_TOKEN env var`** — you ran the archiver directly instead of via the daemon. Run it as a registered extension.
-- **`No Google OAuth token at …`** — run `hydra-acp-archiver login` first.
+- **`No Google OAuth token at …`** — run `hydra-acp-archiver gdrive login` first.
 - **`OAuth credentials file not found`** — follow the **First-time Google setup** steps to download the client JSON from GCP Console.
 - **Files aren't appearing in Drive** — check `~/.hydra-acp/extensions/hydra-acp-archiver.log` for errors. Common: consent-screen test-user list doesn't include your Google account.
 - **Two machines kept overwriting each other** — that's last-writer-wins working as designed if both are actively editing the same session. Avoid editing the same session on two machines simultaneously; one of them will lose its diff. A future `activeOn` claim-lock will close this gap.

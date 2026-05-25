@@ -65,13 +65,34 @@ function boolEnv(name: string, fallback: boolean): boolean {
   return TRUTHY.has(v.toLowerCase());
 }
 
-function backendEnv(): BackendKind {
-  const raw = (process.env.HYDRA_ACP_ARCHIVER_BACKEND ?? "google-drive").toLowerCase();
-  if (raw === "google-drive" || raw === "fs" || raw === "s3") {
-    return raw;
-  }
+function boolVal(
+  envName: string,
+  confKey: string,
+  conf: Map<string, string>,
+  fallback: boolean,
+): boolean {
+  const raw = process.env[envName] ?? conf.get(confKey);
+  if (raw === undefined)
+    return fallback;
+  return TRUTHY.has(raw.toLowerCase());
+}
+
+// ── Derived helpers ───────────────────────────────────────────────────────────
+
+function deriveWsUrl(httpUrl: string): string {
+  if (httpUrl.startsWith("https://"))
+    return "wss://" + httpUrl.slice("https://".length).replace(/\/$/, "") + "/acp";
+  if (httpUrl.startsWith("http://"))
+    return "ws://" + httpUrl.slice("http://".length).replace(/\/$/, "") + "/acp";
+  throw new Error(`hydraDaemonUrl must start with http:// or https://: ${httpUrl}`);
+}
+
+function parseBackend(raw: string): BackendKind {
+  const v = raw.toLowerCase();
+  if (v === "google-drive" || v === "fs" || v === "s3")
+    return v;
   throw new Error(
-    `HYDRA_ACP_ARCHIVER_BACKEND must be one of: google-drive, fs, s3 (got "${raw}")`,
+    `BACKEND must be one of: google-drive, fs, s3 (got "${raw}")`,
   );
 }
 
@@ -84,26 +105,27 @@ export function loadConfig(): Config {
       "Missing HYDRA_ACP_TOKEN env var. When run as a hydra extension, hydra injects this automatically.",
     );
   }
-  const hydraWsUrl =
-    process.env.HYDRA_ACP_WS_URL ?? deriveWsUrl(hydraDaemonUrl);
-  const hydraHome =
-    process.env.HYDRA_ACP_HOME ?? resolve(homedir(), ".hydra-acp");
-  const ruleConfigPath =
-    process.env.HYDRA_ACP_ARCHIVER_CONFIG ??
-    resolve(hydraHome, "archiver.config.js");
-  const credentialsPath =
-    process.env.HYDRA_ACP_ARCHIVER_GOOGLE_CREDENTIALS ??
-    resolve(hydraHome, "archiver-google-credentials.json");
+  const hydraWsUrl = process.env.HYDRA_ACP_WS_URL ?? deriveWsUrl(hydraDaemonUrl);
+  const hydraHome = process.env.HYDRA_ACP_HOME ?? resolve(homedir(), ".hydra-acp");
+
+  const conf = readConf(confPath(hydraHome));
+
+  const ruleConfigPath = str(
+    "HYDRA_ACP_ARCHIVER_CONFIG", "CONFIG", conf,
+    resolve(hydraHome, "archiver.config.js"),
+  );
+  const credentialsPath = str(
+    "HYDRA_ACP_ARCHIVER_GOOGLE_CREDENTIALS", "GOOGLE_CREDENTIALS", conf,
+    resolve(hydraHome, "archiver-google-credentials.json"),
+  );
   const tokenPath = resolve(hydraHome, "archiver-google-token.json");
   const statePath = resolve(hydraHome, "archiver-state.json");
-  const fsDir =
-    process.env.HYDRA_ACP_ARCHIVER_FS_DIR ?? resolve(hydraHome, "archive");
 
-  const backend = backendEnv();
-  const s3Bucket = process.env.HYDRA_ACP_ARCHIVER_S3_BUCKET ?? "";
+  const backend = parseBackend(str("HYDRA_ACP_ARCHIVER_BACKEND", "BACKEND", conf, "google-drive"));
+  const s3Bucket = str("HYDRA_ACP_ARCHIVER_S3_BUCKET", "S3_BUCKET", conf, "");
   if (backend === "s3" && !s3Bucket) {
     throw new Error(
-      "Missing HYDRA_ACP_ARCHIVER_S3_BUCKET env var (required when backend is s3).",
+      "S3_BUCKET is required when BACKEND is s3. Set it in archiver.conf or via HYDRA_ACP_ARCHIVER_S3_BUCKET.",
     );
   }
 
@@ -112,26 +134,25 @@ export function loadConfig(): Config {
     hydraWsUrl,
     hydraToken,
     hydraHome,
-    hydraPollIntervalMs: intEnv("HYDRA_ACP_ARCHIVER_POLL_MS", 2000),
+    hydraPollIntervalMs: intVal("HYDRA_ACP_ARCHIVER_POLL_MS", "POLL_MS", conf, 2000),
     ruleConfigPath,
-    uploadDebounceMs: intEnv("HYDRA_ACP_ARCHIVER_DEBOUNCE_MS", 5000),
-    pullIntervalMs: intEnv("HYDRA_ACP_ARCHIVER_PULL_MS", 60000),
+    uploadDebounceMs: intVal("HYDRA_ACP_ARCHIVER_DEBOUNCE_MS", "DEBOUNCE_MS", conf, 5000),
+    pullIntervalMs: intVal("HYDRA_ACP_ARCHIVER_PULL_MS", "PULL_MS", conf, 60000),
     backend,
-    driveFolderName:
-      process.env.HYDRA_ACP_ARCHIVER_DRIVE_FOLDER ?? "hydra-acp-archive",
-    fsDir,
+    driveFolderName: str("HYDRA_ACP_ARCHIVER_DRIVE_FOLDER", "DRIVE_FOLDER", conf, "hydra-acp-archive"),
+    fsDir: str("HYDRA_ACP_ARCHIVER_FS_DIR", "FS_DIR", conf, resolve(hydraHome, "archive")),
     s3Bucket,
-    s3Region: process.env.HYDRA_ACP_ARCHIVER_S3_REGION,
-    s3Endpoint: process.env.HYDRA_ACP_ARCHIVER_S3_ENDPOINT,
-    prefix: process.env.HYDRA_ACP_ARCHIVER_PREFIX ?? "",
-    hostId: (process.env.HYDRA_ACP_ARCHIVER_HOST_ID ?? hostname())
+    s3Region: optStr("HYDRA_ACP_ARCHIVER_S3_REGION", "S3_REGION", conf),
+    s3Endpoint: optStr("HYDRA_ACP_ARCHIVER_S3_ENDPOINT", "S3_ENDPOINT", conf),
+    prefix: str("HYDRA_ACP_ARCHIVER_PREFIX", "PREFIX", conf, ""),
+    hostId: (optStr("HYDRA_ACP_ARCHIVER_HOST_ID", "HOST_ID", conf) ?? hostname())
       .toLowerCase()
       .replace(/[^a-z0-9-]/g, "-"),
-    encryptionKeyPath: process.env.HYDRA_ACP_ARCHIVER_KEY_PATH,
+    encryptionKeyPath: optStr("HYDRA_ACP_ARCHIVER_KEY_PATH", "KEY_PATH", conf),
     credentialsPath,
     tokenPath,
     statePath,
-    debug: boolEnv("DEBUG", false),
+    debug: boolVal("DEBUG", "DEBUG", conf, false),
   };
 }
 
@@ -142,7 +163,7 @@ export async function loadEncryptionKey(
     return undefined;
   let hex: string;
   try {
-    hex = (await readFile(path, "utf8")).trim();
+    hex = (await readFileAsync(path, "utf8")).trim();
   } catch (err) {
     const e = err as NodeJS.ErrnoException;
     if (e.code === "ENOENT") {
@@ -166,15 +187,13 @@ export interface LoginConfig {
   tokenPath: string;
 }
 
-// loadLoginConfig is for the standalone `hydra-acp-archiver-login` bin —
-// it doesn't need a daemon token, just enough config to know where to
-// read credentials from and write the OAuth tokens to.
 export function loadLoginConfig(): LoginConfig {
-  const hydraHome =
-    process.env.HYDRA_ACP_HOME ?? resolve(homedir(), ".hydra-acp");
-  const credentialsPath =
-    process.env.HYDRA_ACP_ARCHIVER_GOOGLE_CREDENTIALS ??
-    resolve(hydraHome, "archiver-google-credentials.json");
+  const hydraHome = process.env.HYDRA_ACP_HOME ?? resolve(homedir(), ".hydra-acp");
+  const conf = readConf(confPath(hydraHome));
+  const credentialsPath = str(
+    "HYDRA_ACP_ARCHIVER_GOOGLE_CREDENTIALS", "GOOGLE_CREDENTIALS", conf,
+    resolve(hydraHome, "archiver-google-credentials.json"),
+  );
   return {
     hydraHome,
     credentialsPath,

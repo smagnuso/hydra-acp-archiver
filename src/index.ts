@@ -26,12 +26,12 @@ const log = logger("main");
 const USAGE = `usage: hydra-acp-archiver [<command>]
 
 Commands:
-  (no args)   Run as a daemon-managed extension (the daemon spawns it
-              this way automatically when registered).
-  login       Interactive Google OAuth flow — opens a browser and writes
-              the refresh token to ~/.hydra-acp/archiver-google-token.json.
-  keygen      Generate a symmetric encryption key and write it to
-              HYDRA_ACP_ARCHIVER_KEY_PATH (or ~/.hydra-acp/archiver-key).
+  (no args)      Run as a daemon-managed extension (the daemon spawns it
+                 this way automatically when registered).
+  gdrive login   Interactive Google OAuth flow — opens a browser and writes
+                 the refresh token to ~/.hydra-acp/archiver-google-token.json.
+  keygen         Generate a symmetric encryption key and write it to
+                 HYDRA_ACP_ARCHIVER_KEY_PATH (or ~/.hydra-acp/archiver-key).
 
 Flags:
   --version, -v   Print version and exit.
@@ -237,9 +237,25 @@ async function main(): Promise<void> {
     await runExtension();
     return;
   }
+  if (cmd === "gdrive") {
+    const sub = process.argv[3];
+    if (sub === "login") {
+      await runLogin();
+      return;
+    }
+    const subcmds = "login";
+    process.stderr.write(
+      sub !== undefined
+        ? `hydra-acp-archiver gdrive: unknown subcommand "${sub}"\n\nAvailable: ${subcmds}\n`
+        : `hydra-acp-archiver gdrive: missing subcommand\n\nAvailable: ${subcmds}\n`,
+    );
+    process.exit(2);
+  }
   if (cmd === "login") {
-    await runLogin();
-    return;
+    process.stderr.write(
+      `hydra-acp-archiver: "login" is not a command; did you mean "gdrive login"?\n`,
+    );
+    process.exit(2);
   }
   if (cmd === "keygen") {
     await runKeygen();
