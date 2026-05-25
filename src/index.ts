@@ -1,15 +1,20 @@
 #!/usr/bin/env node
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { userInfo } from "node:os";
+import type { SyncBackend } from "./backend/types.js";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ArchiveLoop } from "./archive-loop.js";
+import { EncryptedBackend } from "./backend/encrypted.js";
 import { makeBackend } from "./backend/factory.js";
 import { ArchiverBridge } from "./bridge.js";
 import { runColdSweep } from "./cold-sweep.js";
-import { loadConfig, loadLoginConfig } from "./config.js";
+import { loadConfig, loadEncryptionKey, loadLoginConfig } from "./config.js";
 import { DaemonClient } from "./daemon.js";
 import { HydraDiscovery } from "./discovery.js";
 import { lineageFromKey } from "./envelope.js";
+import { runKeygen } from "./keygen.js";
 import { runGoogleLogin } from "./oauth/google.js";
 import { PullLoop } from "./pull-loop.js";
 import { DEFAULT_RULE, loadRule, type RuleFunction } from "./rule.js";
@@ -25,6 +30,8 @@ Commands:
               this way automatically when registered).
   login       Interactive Google OAuth flow — opens a browser and writes
               the refresh token to ~/.hydra-acp/archiver-google-token.json.
+  keygen      Generate a symmetric encryption key and write it to
+              HYDRA_ACP_ARCHIVER_KEY_PATH (or ~/.hydra-acp/archiver-key).
 
 Flags:
   --version, -v   Print version and exit.
@@ -63,8 +70,29 @@ async function runExtension(): Promise<void> {
   const state = new SyncState(config.statePath);
   await state.load();
 
-  const backend = makeBackend(config);
-  await backend.init();
+  const encryptionKey = await loadEncryptionKey(config.encryptionKeyPath);
+
+  if (config.prefix === "") {
+    if (encryptionKey !== undefined) {
+      config.prefix = createHash("sha256").update(encryptionKey).digest().subarray(0, 8).toString("hex") + "/";
+      log.info(`auto-prefix (key fingerprint): ${config.prefix}`);
+    } else {
+      config.prefix = userInfo().username.toLowerCase().replace(/[^a-z0-9-]/g, "-") + "/";
+      log.info(`auto-prefix (username): ${config.prefix}`);
+    }
+  }
+
+  function buildBackend(prefix: string): SyncBackend {
+    const raw = makeBackend({ ...config, prefix });
+    return encryptionKey !== undefined ? new EncryptedBackend(raw, encryptionKey) : raw;
+  }
+
+  // syncBackend sees the full user namespace (all hosts) — used for listing
+  // and pulling. uploadBackend scopes writes to this host's subdirectory.
+  const syncBackend = buildBackend(config.prefix);
+  const uploadBackend = buildBackend(config.prefix + config.hostId + "/");
+  await syncBackend.init();
+  await uploadBackend.init();
 
   // Reconcile state.json with what's actually on the backend. Without
   // this a wiped backend (manual nuke, retention delete, expired share)
@@ -73,7 +101,7 @@ async function runExtension(): Promise<void> {
   // why nothing flooded in. One list call at startup makes state a
   // hint-cache instead of a source of truth.
   try {
-    const entries = await backend.list();
+    const entries = await syncBackend.list();
     const presentLineages = new Set<string>();
     for (const e of entries) {
       const id = lineageFromKey(e.key);
@@ -101,17 +129,19 @@ async function runExtension(): Promise<void> {
 
   const archive = new ArchiveLoop({
     daemon,
-    backend,
+    backend: uploadBackend,
     state,
     getRule: () => currentRule,
     debounceMs: config.uploadDebounceMs,
+    host: { host: config.hostId, user: userInfo().username },
   });
 
   const pull = new PullLoop({
     daemon,
-    backend,
+    backend: syncBackend,
     state,
     intervalMs: config.pullIntervalMs,
+    hostId: config.hostId,
   });
   pull.start();
 
@@ -193,7 +223,7 @@ async function runExtension(): Promise<void> {
   process.on("SIGTERM", () => shutdown("SIGTERM"));
 
   log.info(
-    `hydra-acp-archiver up; daemon=${config.hydraDaemonUrl} backend=${config.backend} rule=${config.ruleConfigPath}`,
+    `hydra-acp-archiver up; daemon=${config.hydraDaemonUrl} backend=${config.backend} host=${config.hostId} rule=${config.ruleConfigPath}`,
   );
 }
 
@@ -209,6 +239,10 @@ async function main(): Promise<void> {
   }
   if (cmd === "login") {
     await runLogin();
+    return;
+  }
+  if (cmd === "keygen") {
+    await runKeygen();
     return;
   }
   if (cmd === "-h" || cmd === "--help" || cmd === "help") {

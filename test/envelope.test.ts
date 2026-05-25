@@ -153,3 +153,21 @@ test("lineageFromKey reverses keyFor and ignores unrelated keys", () => {
   assert.equal(lineageFromKey("some-random-file.txt"), undefined);
   assert.equal(lineageFromKey(""), undefined);
 });
+
+test("lineageFromKey strips a leading host segment", () => {
+  assert.equal(
+    lineageFromKey(`alice-macbook/${keyFor(LINEAGE)}`),
+    LINEAGE,
+  );
+});
+
+test("lineageFromKey handles any host segment depth correctly", () => {
+  assert.equal(
+    lineageFromKey(`some-host-123/${keyFor(LINEAGE)}`),
+    LINEAGE,
+  );
+});
+
+test("lineageFromKey returns undefined for a host-prefixed non-archive key", () => {
+  assert.equal(lineageFromKey("alice-macbook/not-an-archive.txt"), undefined);
+});

@@ -1,7 +1,8 @@
-import { homedir } from "node:os";
+import { readFile } from "node:fs/promises";
+import { homedir, hostname } from "node:os";
 import { resolve } from "node:path";
 
-export type BackendKind = "google-drive" | "fs";
+export type BackendKind = "google-drive" | "fs" | "s3";
 
 export interface Config {
   hydraDaemonUrl: string;
@@ -19,6 +20,12 @@ export interface Config {
   backend: BackendKind;
   driveFolderName: string;
   fsDir: string;
+  s3Bucket: string;
+  s3Region: string | undefined;
+  s3Endpoint: string | undefined;
+  prefix: string;
+  hostId: string;
+  encryptionKeyPath: string | undefined;
   // OAuth client credentials downloaded from GCP Console (the
   // {installed: {...}} JSON). User-supplied; archiver doesn't ship its
   // own credentials. See README.
@@ -60,11 +67,11 @@ function boolEnv(name: string, fallback: boolean): boolean {
 
 function backendEnv(): BackendKind {
   const raw = (process.env.HYDRA_ACP_ARCHIVER_BACKEND ?? "google-drive").toLowerCase();
-  if (raw === "google-drive" || raw === "fs") {
+  if (raw === "google-drive" || raw === "fs" || raw === "s3") {
     return raw;
   }
   throw new Error(
-    `HYDRA_ACP_ARCHIVER_BACKEND must be one of: google-drive, fs (got "${raw}")`,
+    `HYDRA_ACP_ARCHIVER_BACKEND must be one of: google-drive, fs, s3 (got "${raw}")`,
   );
 }
 
@@ -92,6 +99,14 @@ export function loadConfig(): Config {
   const fsDir =
     process.env.HYDRA_ACP_ARCHIVER_FS_DIR ?? resolve(hydraHome, "archive");
 
+  const backend = backendEnv();
+  const s3Bucket = process.env.HYDRA_ACP_ARCHIVER_S3_BUCKET ?? "";
+  if (backend === "s3" && !s3Bucket) {
+    throw new Error(
+      "Missing HYDRA_ACP_ARCHIVER_S3_BUCKET env var (required when backend is s3).",
+    );
+  }
+
   return {
     hydraDaemonUrl,
     hydraWsUrl,
@@ -101,15 +116,48 @@ export function loadConfig(): Config {
     ruleConfigPath,
     uploadDebounceMs: intEnv("HYDRA_ACP_ARCHIVER_DEBOUNCE_MS", 5000),
     pullIntervalMs: intEnv("HYDRA_ACP_ARCHIVER_PULL_MS", 60000),
-    backend: backendEnv(),
+    backend,
     driveFolderName:
       process.env.HYDRA_ACP_ARCHIVER_DRIVE_FOLDER ?? "hydra-acp-archive",
     fsDir,
+    s3Bucket,
+    s3Region: process.env.HYDRA_ACP_ARCHIVER_S3_REGION,
+    s3Endpoint: process.env.HYDRA_ACP_ARCHIVER_S3_ENDPOINT,
+    prefix: process.env.HYDRA_ACP_ARCHIVER_PREFIX ?? "",
+    hostId: (process.env.HYDRA_ACP_ARCHIVER_HOST_ID ?? hostname())
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, "-"),
+    encryptionKeyPath: process.env.HYDRA_ACP_ARCHIVER_KEY_PATH,
     credentialsPath,
     tokenPath,
     statePath,
     debug: boolEnv("DEBUG", false),
   };
+}
+
+export async function loadEncryptionKey(
+  path: string | undefined,
+): Promise<Buffer | undefined> {
+  if (path === undefined)
+    return undefined;
+  let hex: string;
+  try {
+    hex = (await readFile(path, "utf8")).trim();
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException;
+    if (e.code === "ENOENT") {
+      throw new Error(
+        `Encryption key file not found at ${path}. Run \`hydra-acp-archiver keygen\` to generate one.`,
+      );
+    }
+    throw err;
+  }
+  if (!/^[0-9a-f]{64}$/i.test(hex)) {
+    throw new Error(
+      `Encryption key at ${path} is not a valid 64-character hex string.`,
+    );
+  }
+  return Buffer.from(hex, "hex");
 }
 
 export interface LoginConfig {

@@ -13,6 +13,7 @@ export interface GoogleDriveBackendOptions {
   credentialsPath: string;
   tokenPath: string;
   folderName: string;
+  prefix: string;
 }
 
 // Drive-backed implementation. Uses the drive.file scope, which limits
@@ -21,8 +22,11 @@ export interface GoogleDriveBackendOptions {
 export class GoogleDriveBackend implements SyncBackend {
   private drive: drive_v3.Drive | undefined;
   private folderId: string | undefined;
+  private readonly prefix: string;
 
-  constructor(private readonly opts: GoogleDriveBackendOptions) {}
+  constructor(private readonly opts: GoogleDriveBackendOptions) {
+    this.prefix = opts.prefix;
+  }
 
   async init(): Promise<void> {
     const auth = await loadGoogleAuth({
@@ -53,8 +57,11 @@ export class GoogleDriveBackend implements SyncBackend {
         if (!f.name) {
           continue;
         }
+        if (this.prefix !== "" && !f.name.startsWith(this.prefix)) {
+          continue;
+        }
         entries.push({
-          key: f.name,
+          key: this.prefix !== "" ? f.name.slice(this.prefix.length) : f.name,
           size: typeof f.size === "string" ? Number.parseInt(f.size, 10) : 0,
           modifiedAt: f.modifiedTime ?? new Date(0).toISOString(),
         });
@@ -66,7 +73,7 @@ export class GoogleDriveBackend implements SyncBackend {
 
   async get(key: string): Promise<Buffer> {
     const drive = this.requireDrive();
-    const fileId = await this.findFileId(key);
+    const fileId = await this.findFileId(this.prefix + key);
     if (!fileId) {
       throw new Error(`google-drive: no file named ${key}`);
     }
@@ -80,7 +87,8 @@ export class GoogleDriveBackend implements SyncBackend {
   async put(key: string, data: Buffer): Promise<void> {
     const drive = this.requireDrive();
     const parent = this.requireFolderId();
-    const existing = await this.findFileId(key);
+    const fullName = this.prefix + key;
+    const existing = await this.findFileId(fullName);
     const media = {
       mimeType: FILE_MIME,
       body: Readable.from(data),
@@ -94,7 +102,7 @@ export class GoogleDriveBackend implements SyncBackend {
     }
     await drive.files.create({
       requestBody: {
-        name: key,
+        name: fullName,
         mimeType: FILE_MIME,
         parents: [parent],
       },
@@ -105,7 +113,7 @@ export class GoogleDriveBackend implements SyncBackend {
 
   async delete(key: string): Promise<void> {
     const drive = this.requireDrive();
-    const fileId = await this.findFileId(key);
+    const fileId = await this.findFileId(this.prefix + key);
     if (!fileId) {
       return;
     }

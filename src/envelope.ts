@@ -148,10 +148,13 @@ export function keyFor(lineageId: string): string {
 const KEY_SUFFIX = ".hydra.archive";
 
 // Reverse of keyFor — returns undefined for unrelated keys so callers
-// can safely iterate a mixed backend listing.
+// can safely iterate a mixed backend listing. Handles an optional leading
+// host segment (e.g. "alice-macbook/uuid.hydra.archive" → "uuid").
 export function lineageFromKey(key: string): string | undefined {
   if (!key.endsWith(KEY_SUFFIX)) {
     return undefined;
   }
-  return key.slice(0, -KEY_SUFFIX.length);
+  const withoutSuffix = key.slice(0, -KEY_SUFFIX.length);
+  const slash = withoutSuffix.lastIndexOf("/");
+  return slash >= 0 ? withoutSuffix.slice(slash + 1) : withoutSuffix;
 }

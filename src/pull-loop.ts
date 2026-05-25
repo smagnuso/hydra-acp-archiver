@@ -11,6 +11,7 @@ export interface PullLoopOptions {
   backend: SyncBackend;
   state: SyncState;
   intervalMs: number;
+  hostId: string;
 }
 
 export class PullLoop {
@@ -60,10 +61,14 @@ export class PullLoop {
         log.warn(`session list failed; skipping tick: ${(err as Error).message}`);
         return;
       }
+      const ownPrefix = this.opts.hostId + "/";
       const entries = await this.opts.backend.list();
       for (const entry of entries) {
         if (this.stopped) {
           return;
+        }
+        if (entry.key.startsWith(ownPrefix)) {
+          continue;
         }
         await this.processEntry(entry.key, localSessionIds).catch((err: unknown) => {
           log.warn(

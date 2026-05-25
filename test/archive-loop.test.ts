@@ -36,7 +36,7 @@ function fixture(opts: FixtureOpts = {}): {
   const dir = mkdtempSync(join(tmpdir(), "archiver-archive-"));
   const bundleDir = join(dir, "backend");
   const stateFile = join(dir, "state.json");
-  const backend = new FsBackend({ dir: bundleDir });
+  const backend = new FsBackend({ dir: bundleDir, prefix: "" });
   const state = new SyncState(stateFile);
   let exports = 0;
   const provider = opts.bundleProvider ?? (() => fakeBundle());
@@ -114,7 +114,7 @@ test("debounce collapses bursts into one upload", async () => {
   let exports = 0;
   const dir = mkdtempSync(join(tmpdir(), "archiver-debounce-"));
   try {
-    const backend = new FsBackend({ dir: join(dir, "backend") });
+    const backend = new FsBackend({ dir: join(dir, "backend"), prefix: "" });
     await backend.init();
     const state = new SyncState(join(dir, "state.json"));
     await state.load();
@@ -147,7 +147,7 @@ test("debounce collapses bursts into one upload", async () => {
 test("rule returning false skips upload", async () => {
   const dir = mkdtempSync(join(tmpdir(), "archiver-skip-"));
   try {
-    const backend = new FsBackend({ dir: join(dir, "backend") });
+    const backend = new FsBackend({ dir: join(dir, "backend"), prefix: "" });
     await backend.init();
     const state = new SyncState(join(dir, "state.json"));
     await state.load();

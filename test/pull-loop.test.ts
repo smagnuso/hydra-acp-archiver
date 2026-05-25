@@ -44,7 +44,7 @@ interface Fixture {
 
 function setup(): Fixture {
   const dir = mkdtempSync(join(tmpdir(), "archiver-pull-"));
-  const backend = new FsBackend({ dir: join(dir, "backend") });
+  const backend = new FsBackend({ dir: join(dir, "backend"), prefix: "" });
   const state = new SyncState(join(dir, "state.json"));
   const imports: SessionBundle[] = [];
   const localSessionIds = new Set<string>();
@@ -60,6 +60,7 @@ function setup(): Fixture {
     backend,
     state,
     intervalMs: 60_000,
+    hostId: "local-host",
   });
   return {
     pull,
@@ -218,6 +219,41 @@ test("malformed envelope is skipped without throwing", async () => {
     await f.pull.tickNow();
 
     assert.equal(f.imports.length, 0);
+  } finally {
+    f.pull.stop();
+    f.cleanup();
+  }
+});
+
+test("own-host entries are skipped without being imported", async () => {
+  const f = setup();
+  try {
+    await f.backend.init();
+    await f.state.load();
+
+    const PEER_LINEAGE = "hydra_lineage_peer_0001";
+    const ownKey = `local-host/${keyFor(LINEAGE)}`;
+    const peerKey = `peer-host/${keyFor(PEER_LINEAGE)}`;
+
+    const ownEnvelope = envelopeFor(bundle("own-session"), REMOTE_HOST, "2026-05-20T10:00:00.000Z");
+    const peerBundle: SessionBundle = {
+      version: 1,
+      session: { sessionId: "peer-session", lineageId: PEER_LINEAGE, cwd: "/tmp/p" },
+      history: [],
+    };
+    const peerEnvelope = wrap(peerBundle, PEER_LINEAGE, { host: "peer-host", user: "u" }, new Date("2026-05-20T10:00:00.000Z"));
+
+    await f.backend.put(ownKey, Buffer.from(serialize(ownEnvelope)));
+    await f.backend.put(peerKey, Buffer.from(serialize(peerEnvelope)));
+
+    await f.pull.tickNow();
+
+    // Only the peer envelope should have been imported.
+    assert.equal(f.imports.length, 1);
+    assert.equal(
+      (f.imports[0] as { session?: { sessionId?: string } }).session?.sessionId,
+      "peer-session",
+    );
   } finally {
     f.pull.stop();
     f.cleanup();

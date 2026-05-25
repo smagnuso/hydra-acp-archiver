@@ -57,7 +57,7 @@ test("cold sweep exports cold sessions and skips live ones", async () => {
     { sessionId: "s_cold2", cwd: "/w/c2", status: "cold" },
   ]);
   try {
-    const backend = new FsBackend({ dir: join(dir, "backend") });
+    const backend = new FsBackend({ dir: join(dir, "backend"), prefix: "" });
     await backend.init();
     const { SyncState } = await import("../src/state.js");
     const state = new SyncState(join(dir, "state.json"));
@@ -104,7 +104,7 @@ test("cold sweep is idempotent — second run uploads nothing new", async () => 
     { sessionId: "s1", cwd: "/w/1", status: "cold" },
   ]);
   try {
-    const backend = new FsBackend({ dir: join(dir, "backend") });
+    const backend = new FsBackend({ dir: join(dir, "backend"), prefix: "" });
     await backend.init();
     const { SyncState } = await import("../src/state.js");
     const state = new SyncState(join(dir, "state.json"));
@@ -174,7 +174,7 @@ test("cold sweep skips passive mirrors but exports locally-bound imports", async
     },
   ]);
   try {
-    const backend = new FsBackend({ dir: join(dir, "backend") });
+    const backend = new FsBackend({ dir: join(dir, "backend"), prefix: "" });
     await backend.init();
     const { SyncState } = await import("../src/state.js");
     const state = new SyncState(join(dir, "state.json"));
@@ -222,7 +222,7 @@ test("cold sweep respects the rule fn", async () => {
     { sessionId: "s_skip", cwd: "/tmp/scratch", status: "cold" },
   ]);
   try {
-    const backend = new FsBackend({ dir: join(dir, "backend") });
+    const backend = new FsBackend({ dir: join(dir, "backend"), prefix: "" });
     await backend.init();
     const { SyncState } = await import("../src/state.js");
     const state = new SyncState(join(dir, "state.json"));

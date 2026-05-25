@@ -1,6 +1,6 @@
 # hydra-acp-archiver
 
-Sync extension for [hydra-acp](https://github.com/smagnuso/hydra-acp). Keeps your agent sessions in sync across the machines you work on by uploading session bundles to a shared backend (Google Drive, plain filesystem) after every turn and importing peers' bundles in the background.
+Sync extension for [hydra-acp](https://github.com/smagnuso/hydra-acp). Keeps your agent sessions in sync across the machines you work on by uploading session bundles to a shared backend (Google Drive, S3, plain filesystem) after every turn and importing peers' bundles in the background. Supports optional AES-256-GCM encryption so data at rest is unreadable without your shared key.
 
 Runs as a daemon-managed process, so sessions started on machine A become available on machine B without any manual export/import.
 
@@ -91,6 +91,44 @@ Repeat the same login flow on each machine that should sync, using the **same Go
 
 If you want a different Drive folder per "team" or "context," set `HYDRA_ACP_ARCHIVER_DRIVE_FOLDER` on every participating machine to the same value.
 
+## S3 backend
+
+Works with any S3-compatible store: AWS S3, Cloudflare R2, Backblaze B2, MinIO, Wasabi, etc.
+
+Credentials come from the standard AWS SDK chain — environment variables (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`), `~/.aws/credentials`, or an IAM role. Set `AWS_PROFILE` to use a non-default credentials profile.
+
+```json
+{
+  "extensions": {
+    "hydra-acp-archiver": {
+      "command": ["node"],
+      "args": ["/home/you/dev/hydra-acp-archiver/dist/index.js"],
+      "env": {
+        "HYDRA_ACP_ARCHIVER_BACKEND": "s3",
+        "HYDRA_ACP_ARCHIVER_S3_BUCKET": "my-hydra-archive",
+        "HYDRA_ACP_ARCHIVER_S3_REGION": "us-east-1"
+      }
+    }
+  }
+}
+```
+
+For S3-compatible endpoints (R2, MinIO, B2):
+
+```json
+"HYDRA_ACP_ARCHIVER_S3_ENDPOINT": "https://<accountid>.r2.cloudflarestorage.com"
+```
+
+**Multi-machine setup**: point every machine at the same bucket.
+
+**Data separation**: the archiver sets a prefix automatically so users sharing a bucket don't see each other's sessions:
+- **Encryption on**: prefix defaults to the key fingerprint (e.g. `a1b2c3d4e5f6a7b8/`). Everyone sharing the same key lands in the same namespace; different keys land in different namespaces. Rotating the key changes the prefix, causing a full re-upload with the new key.
+- **Encryption off**: prefix defaults to your OS username (e.g. `alice/`).
+
+Set `HYDRA_ACP_ARCHIVER_PREFIX` explicitly to override the default.
+
+**Delete semantics**: blobs are hard-deleted. Enable [S3 bucket versioning](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Versioning.html) if you want recoverability.
+
 ## Filesystem backend
 
 Useful for testing locally, or for pointing at a folder that a separate sync tool (Syncthing, Dropbox client) already mirrors across your machines.
@@ -110,13 +148,83 @@ Useful for testing locally, or for pointing at a folder that a separate sync too
 }
 ```
 
+## Encryption
+
+All three backends support optional AES-256-GCM encryption. When enabled, blobs are encrypted before upload and decrypted after download — the backend never sees plaintext.
+
+Generate a key on one machine:
+
+```sh
+hydra-acp-archiver keygen
+```
+
+This writes a 32-byte key as a hex file (mode 0600) and prints:
+
+```
+key written to ~/.hydra-acp/archiver-key
+key fingerprint: a1b2c3d4e5f6a7b8
+
+Copy ~/.hydra-acp/archiver-key to every machine that should share this archive.
+Then add to your extension env config:
+  "HYDRA_ACP_ARCHIVER_KEY_PATH": "/home/you/.hydra-acp/archiver-key"
+```
+
+Copy the key file to each machine, then set `HYDRA_ACP_ARCHIVER_KEY_PATH` in every extension env block. The fingerprint lets you verify all machines have the same key.
+
+**Key mismatch**: if a blob was encrypted with a different key, the archiver logs `key mismatch` and skips that blob rather than failing with a confusing crypto error.
+
+**Enabling encryption on an existing archive**: the key fingerprint becomes the new prefix, so old unencrypted blobs (written under a different prefix) are simply ignored — no decryption errors. The cold sweep re-uploads all sessions under the new prefix. To clean up old blobs, remove them from the backend manually.
+
+## Prefix and namespace isolation
+
+Every backend supports an optional namespace prefix. The archiver sets one automatically so multiple users sharing the same storage container don't interfere with each other.
+
+### How the prefix is chosen
+
+1. **`HYDRA_ACP_ARCHIVER_PREFIX` is set** — that value is used verbatim. Set it to `""` to disable the prefix entirely (not recommended on shared storage).
+2. **Encryption is on, no explicit prefix** — the key fingerprint (first 8 bytes of SHA-256 of the key, encoded as 16 hex chars followed by `/`) is used, e.g. `a1b2c3d4e5f6a7b8/`. Everyone sharing the same key lands in the same namespace; different keys land in different namespaces. Rotating the key changes the prefix, which isolates new blobs from old ones.
+3. **Encryption off, no explicit prefix** — the OS username (sanitized to lowercase alphanumeric + hyphens, followed by `/`) is used, e.g. `alice/`.
+
+### Host segregation
+
+Within the user prefix, each machine writes to its own subdirectory named by its host ID. The full storage path is `<user-prefix><hostId>/<lineageId>.hydra.archive`. For example:
+
+```
+a1b2c3d4e5f6a7b8/
+  alice-macbook/uuid1.hydra.archive
+  alice-macbook/uuid2.hydra.archive
+  alice-desktop/uuid3.hydra.archive
+```
+
+The pull loop reads across all host subdirectories (seeing all peers' sessions) but skips its own host's files entirely — cheaper than parsing envelopes for self-loop detection. The session-ID check remains as a second layer for edge cases.
+
+Set `HYDRA_ACP_ARCHIVER_HOST_ID` to override the default (`os.hostname()` sanitized). Useful in containers or after a machine rename. Use the same value consistently across daemon restarts on a machine — changing it creates a new subdirectory and triggers a full re-upload.
+
+### What the prefix does per backend
+
+| Backend | Prefix behaviour |
+|---|---|
+| **S3** | Prepended to the S3 object key. `ListObjectsV2` is called with the `Prefix` parameter so only matching objects are fetched — efficient on large shared buckets. |
+| **fs** | Resolved as a subdirectory of the archive directory. Files land at `<dir>/<prefix>/<key>`. Each prefix gets its own isolated directory. |
+| **Google Drive** | Prepended to the Drive filename. Drive has no native directory structure within a folder, so `alice/uuid.hydra.archive` is literally the filename. `list()` filters client-side. |
+
+### Key rotation and re-upload
+
+When encryption is enabled and you regenerate the key (`hydra-acp-archiver keygen`), the fingerprint prefix changes. The new prefix namespace is empty, so the cold sweep on the next daemon start re-uploads all sessions encrypted with the new key. Old blobs under the previous prefix are simply ignored — no decryption errors, no manual cleanup required (though you can delete the old prefix from the bucket/dir when convenient).
+
 ## Environment variables
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `HYDRA_ACP_ARCHIVER_BACKEND` | `google-drive` | `google-drive` \| `fs` |
+| `HYDRA_ACP_ARCHIVER_BACKEND` | `google-drive` | `google-drive` \| `fs` \| `s3` |
 | `HYDRA_ACP_ARCHIVER_DRIVE_FOLDER` | `hydra-acp-archive` | Drive folder name |
 | `HYDRA_ACP_ARCHIVER_FS_DIR` | `~/.hydra-acp/archive` | Used when backend is `fs` |
+| `HYDRA_ACP_ARCHIVER_S3_BUCKET` | — | Bucket name (required for `s3`) |
+| `HYDRA_ACP_ARCHIVER_S3_REGION` | AWS SDK default | AWS region |
+| `HYDRA_ACP_ARCHIVER_S3_ENDPOINT` | — | Custom endpoint for R2/MinIO/B2 |
+| `HYDRA_ACP_ARCHIVER_PREFIX` | auto (fingerprint or username) | User-level namespace prefix applied by all backends |
+| `HYDRA_ACP_ARCHIVER_HOST_ID` | `os.hostname()` (sanitized) | Host identifier used as a subdirectory under the user prefix |
+| `HYDRA_ACP_ARCHIVER_KEY_PATH` | — | Path to encryption key file; if unset, encryption is off |
 | `HYDRA_ACP_ARCHIVER_GOOGLE_CREDENTIALS` | `~/.hydra-acp/archiver-google-credentials.json` | OAuth client JSON from GCP |
 | `HYDRA_ACP_ARCHIVER_CONFIG` | `~/.hydra-acp/archiver.config.js` | Rule file (optional) |
 | `HYDRA_ACP_ARCHIVER_POLL_MS` | `2000` | Session discovery cadence |
@@ -155,6 +263,7 @@ Return `false` to skip an upload. Any other value (including `undefined`) archiv
 - `~/.hydra-acp/archiver-state.json` — per-lineage cache of last uploaded hash + last seen remote upload, used for self-loop suppression. Safe to delete; archiver will rebuild it.
 - `~/.hydra-acp/archiver-google-credentials.json` — OAuth client JSON you downloaded.
 - `~/.hydra-acp/archiver-google-token.json` — refresh + access token (mode 0600). Re-run `hydra-acp-archiver login` to refresh.
+- `~/.hydra-acp/archiver-key` — encryption key (mode 0600), written by `hydra-acp-archiver keygen`. Copy this file to every machine in your sync group. Keep it safe — losing it means losing access to encrypted blobs.
 
 ## Troubleshooting
 
@@ -166,4 +275,4 @@ Return `false` to skip an upload. Any other value (including `undefined`) archiv
 
 ## Backends
 
-Current: `google-drive`, `fs`. Adding a new one means implementing the `SyncBackend` interface in `src/backend/types.ts` and wiring it into `src/backend/factory.ts`.
+Current: `google-drive`, `fs`, `s3`. Adding a new one means implementing the `SyncBackend` interface in `src/backend/types.ts` and wiring it into `src/backend/factory.ts`. Encryption is handled by the `EncryptedBackend` wrapper in `src/backend/encrypted.ts` — new backends get it for free.
