@@ -13,11 +13,13 @@ export interface LineageState {
 
 interface StateFile {
   version: 1;
+  prefix: string;
+  backend: string;
   lineages: Record<string, LineageState>;
 }
 
-function emptyState(): StateFile {
-  return { version: 1, lineages: {} };
+function emptyState(prefix: string, backend: string): StateFile {
+  return { version: 1, prefix, backend, lineages: {} };
 }
 
 // All writes go through a single in-process queue so concurrent
@@ -30,24 +32,38 @@ export class SyncState {
 
   constructor(private readonly path: string) {}
 
-  async load(): Promise<void> {
+  async load(prefix: string, backend: string): Promise<void> {
     try {
       const text = await readFile(this.path, "utf8");
       const parsed = JSON.parse(text) as StateFile;
       if (parsed.version !== 1 || !parsed.lineages) {
         log.warn(`state file at ${this.path} had unexpected shape; ignoring`);
-        this.cache = emptyState();
+        this.cache = emptyState(prefix, backend);
         return;
       }
+      const storedPrefix = parsed.prefix;
+      const storedBackend = parsed.backend;
       this.cache = parsed;
+      this.cache.prefix = prefix;
+      this.cache.backend = backend;
+      if (storedPrefix !== prefix || storedBackend !== backend) {
+        log.info(
+          `namespace changed (${storedBackend ?? "?"}:${storedPrefix ?? "none"} → ${backend}:${prefix}); resetting pull state`,
+        );
+        for (const entry of Object.values(this.cache.lineages)) {
+          delete entry.lastSeenRemoteUploadedAt;
+          delete entry.lastSeenRemoteBy;
+        }
+        await this.flush();
+      }
     } catch (err) {
       const e = err as NodeJS.ErrnoException;
       if (e.code === "ENOENT") {
-        this.cache = emptyState();
+        this.cache = emptyState(prefix, backend);
         return;
       }
       log.warn(`failed to read ${this.path}: ${e.message}; starting fresh`);
-      this.cache = emptyState();
+      this.cache = emptyState(prefix, backend);
     }
   }
 

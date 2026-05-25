@@ -76,7 +76,7 @@ test("imports a fresh remote envelope and updates state", async () => {
   const f = setup();
   try {
     await f.backend.init();
-    await f.state.load();
+    await f.state.load("", "fs");
     const env = envelopeFor(
       bundle("s_remote", [{ role: "assistant", text: "remote turn" }]),
       REMOTE_HOST,
@@ -102,7 +102,7 @@ test("does not re-import an envelope older than lastSeenRemoteUploadedAt", async
   const f = setup();
   try {
     await f.backend.init();
-    await f.state.load();
+    await f.state.load("", "fs");
     await f.state.set(LINEAGE, {
       lastSeenRemoteUploadedAt: "2026-05-20T12:00:00.000Z",
       lastSeenRemoteBy: REMOTE_HOST,
@@ -132,7 +132,7 @@ test("self-loop suppression: envelope whose sessionId is local is skipped", asyn
   const f = setup();
   try {
     await f.backend.init();
-    await f.state.load();
+    await f.state.load("", "fs");
     f.localSessionIds.add("s_local");
     const env = envelopeFor(
       bundle("s_local"),
@@ -157,7 +157,7 @@ test("envelope with unknown sessionId is imported even when lineage is known", a
   const f = setup();
   try {
     await f.backend.init();
-    await f.state.load();
+    await f.state.load("", "fs");
     f.localSessionIds.add("s_local");
     await f.state.set(LINEAGE, {
       lastUploadedHash: "sha256:older",
@@ -184,7 +184,7 @@ test("newer remote envelope re-imports even when state has an older lastSeenRemo
   const f = setup();
   try {
     await f.backend.init();
-    await f.state.load();
+    await f.state.load("", "fs");
     await f.state.set(LINEAGE, {
       lastSeenRemoteUploadedAt: "2026-05-20T09:00:00.000Z",
       lastSeenRemoteBy: REMOTE_HOST,
@@ -210,7 +210,7 @@ test("malformed envelope is skipped without throwing", async () => {
   const f = setup();
   try {
     await f.backend.init();
-    await f.state.load();
+    await f.state.load("", "fs");
     await f.backend.put(
       keyFor(LINEAGE),
       Buffer.from("not valid json", "utf8"),
@@ -229,7 +229,7 @@ test("own-host entries are skipped without being imported", async () => {
   const f = setup();
   try {
     await f.backend.init();
-    await f.state.load();
+    await f.state.load("", "fs");
 
     const PEER_LINEAGE = "hydra_lineage_peer_0001";
     const ownKey = `local-host/${keyFor(LINEAGE)}`;

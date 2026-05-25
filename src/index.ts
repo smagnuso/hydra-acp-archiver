@@ -67,9 +67,6 @@ async function runExtension(): Promise<void> {
   const config = loadConfig();
   setDebug(config.debug);
 
-  const state = new SyncState(config.statePath);
-  await state.load();
-
   const encryptionKey = await loadEncryptionKey(config.encryptionKeyPath);
 
   if (config.prefix === "") {
@@ -81,6 +78,9 @@ async function runExtension(): Promise<void> {
       log.info(`auto-prefix (username): ${config.prefix}`);
     }
   }
+
+  const state = new SyncState(config.statePath);
+  await state.load(config.prefix, config.backend);
 
   function buildBackend(prefix: string): SyncBackend {
     const raw = makeBackend({ ...config, prefix });
