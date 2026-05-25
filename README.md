@@ -212,10 +212,47 @@ Set `HYDRA_ACP_ARCHIVER_HOST_ID` to override the default (`os.hostname()` saniti
 
 When encryption is enabled and you regenerate the key (`hydra-acp-archiver keygen`), the fingerprint prefix changes. The new prefix namespace is empty, so the cold sweep on the next daemon start re-uploads all sessions encrypted with the new key. Old blobs under the previous prefix are simply ignored — no decryption errors, no manual cleanup required (though you can delete the old prefix from the bucket/dir when convenient).
 
+## Configuration file
+
+Instead of setting environment variables in `config.json`, you can use a plain-text config file at `~/.hydra-acp/archiver.conf` (override with `HYDRA_ACP_ARCHIVER_CONF`). Environment variables always take precedence over file values.
+
+```sh
+# ~/.hydra-acp/archiver.conf
+# All keys are optional — omit any you don't need.
+# Env vars override these values when both are set.
+
+BACKEND=s3
+
+# S3
+S3_BUCKET=my-hydra-archive
+S3_REGION=us-east-1
+# S3_ENDPOINT=https://<accountid>.r2.cloudflarestorage.com
+
+# Encryption
+KEY_PATH=/home/you/.hydra-acp/archiver-key
+
+# Identity
+HOST_ID=alice-macbook
+
+# Google Drive
+# GOOGLE_CREDENTIALS=/home/you/.hydra-acp/archiver-google-credentials.json
+# DRIVE_FOLDER=hydra-acp-archive
+
+# Tuning (rarely needed)
+# DEBOUNCE_MS=5000
+# PULL_MS=60000
+# DEBUG=false
+```
+
+Restrict permissions on the file if it contains sensitive paths: `chmod 600 ~/.hydra-acp/archiver.conf`.
+
+The file is optional — if it doesn't exist the archiver falls back to environment variables only.
+
 ## Environment variables
 
 | Variable | Default | Notes |
 | --- | --- | --- |
+| `HYDRA_ACP_ARCHIVER_CONF` | `~/.hydra-acp/archiver.conf` | Path to the config file |
 | `HYDRA_ACP_ARCHIVER_BACKEND` | `google-drive` | `google-drive` \| `fs` \| `s3` |
 | `HYDRA_ACP_ARCHIVER_DRIVE_FOLDER` | `hydra-acp-archive` | Drive folder name |
 | `HYDRA_ACP_ARCHIVER_FS_DIR` | `~/.hydra-acp/archive` | Used when backend is `fs` |

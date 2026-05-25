@@ -1,6 +1,9 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { resolve } from "node:path";
+import { promisify } from "node:util";
+
+const readFileAsync = promisify(readFile);
 
 export type BackendKind = "google-drive" | "fs" | "s3";
 
@@ -36,33 +39,78 @@ export interface Config {
   debug: boolean;
 }
 
-function deriveWsUrl(httpUrl: string): string {
-  if (httpUrl.startsWith("https://")) {
-    return "wss://" + httpUrl.slice("https://".length).replace(/\/$/, "") + "/acp";
-  }
-  if (httpUrl.startsWith("http://")) {
-    return "ws://" + httpUrl.slice("http://".length).replace(/\/$/, "") + "/acp";
-  }
-  throw new Error(`hydraDaemonUrl must start with http:// or https://: ${httpUrl}`);
+// ── Conf file ────────────────────────────────────────────────────────────────
+
+function confPath(hydraHome: string): string {
+  return process.env.HYDRA_ACP_ARCHIVER_CONF ?? resolve(hydraHome, "archiver.conf");
 }
 
-function intEnv(name: string, fallback: number): number {
-  const v = process.env[name];
-  if (!v) {
-    return fallback;
+function parseConfFile(text: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#"))
+      continue;
+    const eq = line.indexOf("=");
+    if (eq === -1)
+      continue;
+    const key = line.slice(0, eq).trim();
+    let val = line.slice(eq + 1).trim();
+    if (
+      (val.startsWith('"') && val.endsWith('"')) ||
+      (val.startsWith("'") && val.endsWith("'"))
+    )
+      val = val.slice(1, -1);
+    out.set(key, val);
   }
-  const n = Number.parseInt(v, 10);
-  return Number.isFinite(n) ? n : fallback;
+  return out;
 }
+
+// Returns an empty map when the file does not exist — conf file is optional.
+function readConf(path: string): Map<string, string> {
+  try {
+    return parseConfFile(readFileSync(path, "utf8"));
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException;
+    if (e.code === "ENOENT")
+      return new Map();
+    throw err;
+  }
+}
+
+// ── Value helpers ─────────────────────────────────────────────────────────────
+// Priority for every config value: env var > conf file > default.
 
 const TRUTHY = new Set(["1", "true", "yes", "on", "t"]);
 
-function boolEnv(name: string, fallback: boolean): boolean {
-  const v = process.env[name];
-  if (v === undefined) {
+function str(
+  envName: string,
+  confKey: string,
+  conf: Map<string, string>,
+  fallback: string,
+): string {
+  return process.env[envName] ?? conf.get(confKey) ?? fallback;
+}
+
+function optStr(
+  envName: string,
+  confKey: string,
+  conf: Map<string, string>,
+): string | undefined {
+  return process.env[envName] ?? conf.get(confKey);
+}
+
+function intVal(
+  envName: string,
+  confKey: string,
+  conf: Map<string, string>,
+  fallback: number,
+): number {
+  const raw = process.env[envName] ?? conf.get(confKey);
+  if (!raw)
     return fallback;
-  }
-  return TRUTHY.has(v.toLowerCase());
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 function boolVal(
@@ -95,6 +143,8 @@ function parseBackend(raw: string): BackendKind {
     `BACKEND must be one of: google-drive, fs, s3 (got "${raw}")`,
   );
 }
+
+// ── Public API ────────────────────────────────────────────────────────────────
 
 export function loadConfig(): Config {
   const hydraDaemonUrl =
