@@ -26,6 +26,9 @@ const log = logger("main");
 const USAGE = `usage: hydra-acp-archiver [<command>]
 
 Commands:
+  setup          Interactive first-run wizard — picks a backend, sets up
+                 OAuth/credentials/encryption, writes archiver.conf, and
+                 (optionally) registers the extension with hydra.
   (no args)      Run as a daemon-managed extension (the daemon spawns it
                  this way automatically when registered).
   gdrive login   Interactive Google OAuth flow — opens a browser and writes
@@ -259,6 +262,11 @@ async function main(): Promise<void> {
   }
   if (cmd === "keygen") {
     await runKeygen();
+    return;
+  }
+  if (cmd === "setup") {
+    const { runSetup } = await import("./setup/wizard.js");
+    await runSetup();
     return;
   }
   if (cmd === "-h" || cmd === "--help" || cmd === "help") {

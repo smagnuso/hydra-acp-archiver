@@ -23,8 +23,6 @@ From npm (recommended once published):
 npm install -g @hydra-acp/archiver
 ```
 
-Drops a `hydra-acp-archiver` binary on your PATH.
-
 Or from source:
 
 ```sh
@@ -34,7 +32,39 @@ npm install
 npm run build
 ```
 
-Register the extension with hydra:
+## Setup
+
+```sh
+hydra-acp-archiver setup
+```
+
+The wizard walks you through picking a backend (Google Drive / S3 / Filesystem), configuring credentials, optionally generating an AES-256-GCM key for encryption, writing `~/.hydra-acp/archiver.conf`, and registering the archiver as a hydra extension. About 1 minute for S3/Filesystem; about 5–8 minutes for Google Drive (the GCP Console click-through is the long pole).
+
+Re-run `hydra-acp-archiver setup` any time to switch backends or rotate keys — it preserves existing custom config keys.
+
+<details>
+<summary>Manual Google Drive setup (if you prefer not to run the wizard)</summary>
+
+The Google Drive backend uses OAuth 2.0 with the **`drive.file`** scope — the archiver can only see files it creates plus those you explicitly hand it via a picker. Your other Drive contents stay invisible to it.
+
+You provide your own OAuth client (Google's terms make it impractical to ship a shared one):
+
+1. Go to <https://console.cloud.google.com/> and create or pick a project.
+2. Enable the **Google Drive API** for that project.
+3. Configure the **OAuth consent screen**. User type: **External**. Add your Google account under **Test Users**.
+4. **Credentials → Create credentials → OAuth client ID**. Application type: **Desktop app**.
+5. Download the resulting JSON and save it to `~/.hydra-acp/archiver-google-credentials.json` (or anywhere, and set `HYDRA_ACP_ARCHIVER_GOOGLE_CREDENTIALS`).
+6. Run `hydra-acp-archiver gdrive login`. Your browser opens to Google's consent screen. The "Google hasn't verified this app" interstitial is expected for an unverified personal-use client — click **Advanced → Go to (unsafe)** and approve. The redirect lands on a transient local server, the archiver writes `~/.hydra-acp/archiver-google-token.json` (mode 0600), and you're done.
+7. Register: `hydra-acp extensions add hydra-acp-archiver`.
+
+After this, restart the daemon. The archiver process starts up, creates a `hydra-acp-archive/` folder in your Drive on first upload, and begins syncing.
+
+</details>
+
+<details>
+<summary>Manual extension registration</summary>
+
+If you skip the wizard's registration step, run:
 
 ```sh
 hydra-acp extensions add hydra-acp-archiver
@@ -48,48 +78,15 @@ hydra-acp extensions add hydra-acp-archiver \
   --args ~/dev/hydra-acp-archiver/dist/index.js
 ```
 
-That writes the equivalent entry into `~/.hydra-acp/config.json`:
+That writes the equivalent entry into `~/.hydra-acp/config.json`. On `hydra-acp daemon start`, hydra spawns hydra-acp-archiver as a managed subprocess. Stdout/stderr land in `~/.hydra-acp/extensions/hydra-acp-archiver.log`.
 
-```json
-{
-  "extensions": {
-    "hydra-acp-archiver": {
-      "command": ["node"],
-      "args": ["/home/you/dev/hydra-acp-archiver/dist/index.js"],
-      "enabled": true
-    }
-  }
-}
-```
-
-On `hydra-acp daemon start`, hydra spawns hydra-acp-archiver as a managed subprocess. Stdout/stderr land in `~/.hydra-acp/extensions/hydra-acp-archiver.log`.
-
-## First-time Google setup
-
-The Google Drive backend uses OAuth 2.0 with the **`drive.file`** scope — the archiver can only see files it creates plus those you explicitly hand it via a picker. Your other Drive contents stay invisible to it.
-
-You provide your own OAuth client (Google's terms make it impractical to ship a shared one):
-
-1. Go to <https://console.cloud.google.com/> and create or pick a project.
-2. Enable the **Google Drive API** for that project.
-3. Configure the **OAuth consent screen**. User type: **External**. Add your Google account under **Test Users**.
-4. **Credentials → Create credentials → OAuth client ID**. Application type: **Desktop app**.
-5. Download the resulting JSON and save it to `~/.hydra-acp/archiver-google-credentials.json` (or anywhere, and set `HYDRA_ACP_ARCHIVER_GOOGLE_CREDENTIALS`).
-6. Run:
-
-   ```sh
-   hydra-acp-archiver gdrive login
-   ```
-
-   Your browser opens to Google's consent screen. The "Google hasn't verified this app" interstitial is expected for an unverified personal-use client — click **Advanced → Go to (unsafe)** and approve. The redirect lands on a transient local server, the archiver writes `~/.hydra-acp/archiver-google-token.json` (mode 0600), and you're done.
-
-After this, restart the daemon. The archiver process starts up, creates a `hydra-acp-archive/` folder in your Drive on first upload, and begins syncing.
+</details>
 
 ## Multi-machine setup
 
-Repeat the same login flow on each machine that should sync, using the **same Google account**. Each machine gets its own refresh token; they all point at the same Drive folder.
+Run `hydra-acp-archiver setup` on each machine that should sync. For Google Drive, log in with the **same Google account** and use the **same Drive folder name** so each machine points at the shared archive. For S3, point each machine at the same bucket. For filesystem, point each at a directory that some external sync tool (Syncthing, Dropbox, iCloud) mirrors.
 
-If you want a different Drive folder per "team" or "context," set `HYDRA_ACP_ARCHIVER_DRIVE_FOLDER` on every participating machine to the same value.
+If you turned on encryption, copy `~/.hydra-acp/archiver-key` from your first machine to each peer; the wizard's fingerprint output lets you verify they match.
 
 ## S3 backend
 
