@@ -278,6 +278,14 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  process.stderr.write(`hydra-acp-archiver: ${(err as Error).message}\n`);
+  const msg = (err as Error).message;
+  process.stderr.write(`hydra-acp-archiver: ${msg}\n`);
+  if (/invalid_grant/i.test(msg)) {
+    process.stderr.write(
+      "Google refresh token is invalid. Run `hydra-acp-archiver gdrive login` to re-authorize.\n",
+    );
+    // sysexits EX_CONFIG — tells the daemon supervisor not to restart us.
+    process.exit(78);
+  }
   process.exit(1);
 });
