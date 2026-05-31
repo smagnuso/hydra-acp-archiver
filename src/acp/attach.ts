@@ -207,7 +207,9 @@ export class AcpAttach extends EventEmitter<AttachEvents> {
       }>("session/attach", {
         sessionId: this.opts.sessionId,
         historyPolicy: "none",
-        readonly: true,
+        // readonly is a hydra extension → rides under _meta["hydra-acp"]
+        // (session/attach keeps only RFD #533 fields at the top level).
+        _meta: { "hydra-acp": { readonly: true } },
         clientInfo: { name: "hydra-acp-archiver", version: pkg.version },
       });
       log.info(
