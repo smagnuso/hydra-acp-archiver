@@ -195,12 +195,19 @@ export class AcpAttach extends EventEmitter<AttachEvents> {
     try {
       // historyPolicy: "none" — the archiver pulls full bundles via REST,
       // it doesn't need history replayed over the WS attach.
+      //
+      // readonly: true — the archiver is a passive observer. On a live
+      // session this still binds as a real attached client and streams
+      // session/update. On a cold session it takes the daemon's viewer
+      // path instead of resurrecting an agent, so re-attaching after an
+      // idle close can't keep a quiet session on a resurrection treadmill.
       const attachResult = await this.request<{
         sessionId: string;
         replayed?: number;
       }>("session/attach", {
         sessionId: this.opts.sessionId,
         historyPolicy: "none",
+        readonly: true,
         clientInfo: { name: "hydra-acp-archiver", version: pkg.version },
       });
       log.info(
