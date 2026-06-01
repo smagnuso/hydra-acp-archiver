@@ -24,6 +24,8 @@ export interface SessionBundle {
 export interface DaemonClientOptions {
   daemonUrl: string;
   token: string;
+  // Tool-payload shape requested when exporting bundles. Defaults to inline.
+  toolContent?: "inline" | "references" | "summary";
 }
 
 export class DaemonClient {
@@ -49,7 +51,14 @@ export class DaemonClient {
   }
 
   async exportSession(sessionId: string): Promise<SessionBundle> {
-    const url = `${this.opts.daemonUrl}/v1/sessions/${encodeURIComponent(sessionId)}/export`;
+    // tools= shapes the bundle's tool payload (TOOL_CONTENT config):
+    //   references — ref-form history + deduped, gzipped blobs (complete,
+    //                ~3.5x smaller than inline; needs hydra stage-3+ importers)
+    //   summary    — bodies dropped (smallest, lossy)
+    //   inline     — full content (default; universally importable)
+    const mode = this.opts.toolContent ?? "inline";
+    const query = mode === "inline" ? "" : `?tools=${mode}`;
+    const url = `${this.opts.daemonUrl}/v1/sessions/${encodeURIComponent(sessionId)}/export${query}`;
     const r = await fetch(url, {
       headers: { Authorization: `Bearer ${this.opts.token}` },
     });

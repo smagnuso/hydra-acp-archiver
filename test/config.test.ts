@@ -3,7 +3,63 @@ import { test } from "node:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadEncryptionKey } from "../src/config.js";
+import { loadEncryptionKey, loadConfig } from "../src/config.js";
+
+// Run loadConfig() with a clean env + temp HYDRA_ACP_HOME, restoring env.
+function withConfigEnv<T>(
+  env: Record<string, string | undefined>,
+  conf: string | undefined,
+  fn: () => T,
+): T {
+  const dir = mkdtempSync(join(tmpdir(), "archiver-conf-"));
+  if (conf !== undefined) {
+    writeFileSync(join(dir, "archiver.conf"), conf);
+  }
+  const saved: Record<string, string | undefined> = {};
+  const set = (k: string, v: string | undefined) => {
+    saved[k] = process.env[k];
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  };
+  // Clear conf-overriding envs so the conf file (or default) wins.
+  set("HYDRA_ACP_ARCHIVER_TOOL_CONTENT", undefined);
+  set("HYDRA_ACP_HOME", dir);
+  set("HYDRA_ACP_TOKEN", "t");
+  set("HYDRA_ACP_ARCHIVER_CONF", join(dir, "archiver.conf"));
+  for (const [k, v] of Object.entries(env)) set(k, v);
+  try {
+    return fn();
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("loadConfig: toolContent defaults to inline", () => {
+  const c = withConfigEnv({}, undefined, () => loadConfig());
+  assert.equal(c.toolContent, "inline");
+});
+
+test("loadConfig: toolContent honors TOOL_CONTENT from conf (references/summary)", () => {
+  assert.equal(
+    withConfigEnv({}, "TOOL_CONTENT=references\n", () => loadConfig()).toolContent,
+    "references",
+  );
+  assert.equal(
+    withConfigEnv({}, "TOOL_CONTENT=summary\n", () => loadConfig()).toolContent,
+    "summary",
+  );
+});
+
+test("loadConfig: invalid TOOL_CONTENT falls back to inline", () => {
+  assert.equal(
+    withConfigEnv({}, "TOOL_CONTENT=bogus\n", () => loadConfig()).toolContent,
+    "inline",
+  );
+});
 
 function fixture(): { dir: string; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), "archiver-config-"));

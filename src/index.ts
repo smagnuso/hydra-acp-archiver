@@ -125,6 +125,7 @@ async function runExtension(): Promise<void> {
   const daemon = new DaemonClient({
     daemonUrl: config.hydraDaemonUrl,
     token: config.hydraToken,
+    toolContent: config.toolContent,
   });
 
   let currentRule: RuleFunction = DEFAULT_RULE;

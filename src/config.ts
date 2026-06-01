@@ -36,6 +36,13 @@ export interface Config {
   // OAuth refresh + access token, written by the login bin.
   tokenPath: string;
   statePath: string;
+  // How tool payload is exported into archived bundles:
+  //   inline (default) — full content; universally importable but largest.
+  //   references       — ref-form history + deduped, gzipped tool blobs:
+  //                       complete and ~3.5x smaller. Requires importers to
+  //                       run a hydra new enough to hydrate refs (stage 3+).
+  //   summary          — smallest, lossy: tool bodies are dropped.
+  toolContent: "inline" | "references" | "summary";
   debug: boolean;
 }
 
@@ -208,8 +215,17 @@ export function loadConfig(): Config {
     credentialsPath,
     tokenPath,
     statePath,
+    toolContent: parseToolContent(
+      str("HYDRA_ACP_ARCHIVER_TOOL_CONTENT", "TOOL_CONTENT", conf, "inline"),
+    ),
     debug: boolVal("DEBUG", "DEBUG", conf, false),
   };
+}
+
+function parseToolContent(
+  value: string,
+): "inline" | "references" | "summary" {
+  return value === "references" || value === "summary" ? value : "inline";
 }
 
 export async function loadEncryptionKey(
