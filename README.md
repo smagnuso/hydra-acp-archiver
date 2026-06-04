@@ -20,7 +20,24 @@ Conflict resolution is last-writer-wins by envelope `uploadedAt`. The envelope f
 From npm (recommended once published):
 
 ```sh
-npm install -g @hydra-acp/archiver
+npm install -g @hydra-acp/cli @hydra-acp/archiver
+```
+
+This drops the `hydra-acp` (and `hydra`) CLI plus a `hydra-acp-archiver` binary on your PATH. The CLI dispatches `hydra-acp <name>` to any `hydra-acp-<name>` binary on PATH, so the archiver is also reachable as `hydra-acp archiver`.
+
+Or from source:
+
+```sh
+git clone git@github.com:smagnuso/hydra-acp-archiver.git ~/dev/hydra-acp-archiver
+cd ~/dev/hydra-acp-archiver
+npm install
+npm run build
+```
+
+## Setup
+
+```sh
+hydra-acp archiver setup
 ```
 
 Or from source:
@@ -40,7 +57,7 @@ hydra-acp-archiver setup
 
 The wizard walks you through picking a backend (Google Drive / S3 / Filesystem), configuring credentials, optionally generating an AES-256-GCM key for encryption, writing `~/.hydra-acp/archiver.conf`, and registering the archiver as a hydra extension. About 1 minute for S3/Filesystem; about 5–8 minutes for Google Drive (the GCP Console click-through is the long pole).
 
-Re-run `hydra-acp-archiver setup` any time to switch backends or rotate keys — it preserves existing custom config keys.
+Re-run `hydra-acp archiver setup` any time to switch backends or rotate keys — it preserves existing custom config keys.
 
 <details>
 <summary>Manual Google Drive setup (if you prefer not to run the wizard)</summary>
@@ -54,7 +71,7 @@ You provide your own OAuth client (Google's terms make it impractical to ship a 
 3. Configure the **OAuth consent screen**. User type: **External**. Add your Google account under **Test Users**.
 4. **Credentials → Create credentials → OAuth client ID**. Application type: **Desktop app**.
 5. Download the resulting JSON and save it to `~/.hydra-acp/archiver-google-credentials.json` (or anywhere, and set `HYDRA_ACP_ARCHIVER_GOOGLE_CREDENTIALS`).
-6. Run `hydra-acp-archiver gdrive login`. Your browser opens to Google's consent screen. The "Google hasn't verified this app" interstitial is expected for an unverified personal-use client — click **Advanced → Go to (unsafe)** and approve. The redirect lands on a transient local server, the archiver writes `~/.hydra-acp/archiver-google-token.json` (mode 0600), and you're done.
+6. Run `hydra-acp archiver gdrive login`. Your browser opens to Google's consent screen. The "Google hasn't verified this app" interstitial is expected for an unverified personal-use client — click **Advanced → Go to (unsafe)** and approve. The redirect lands on a transient local server, the archiver writes `~/.hydra-acp/archiver-google-token.json` (mode 0600), and you're done.
 7. Register: `hydra-acp extensions add hydra-acp-archiver`.
 
 After this, restart the daemon. The archiver process starts up, creates a `hydra-acp-archive/` folder in your Drive on first upload, and begins syncing.
@@ -84,7 +101,7 @@ That writes the equivalent entry into `~/.hydra-acp/config.json`. On `hydra-acp 
 
 ## Multi-machine setup
 
-Run `hydra-acp-archiver setup` on each machine that should sync. For Google Drive, log in with the **same Google account** and use the **same Drive folder name** so each machine points at the shared archive. For S3, point each machine at the same bucket. For filesystem, point each at a directory that some external sync tool (Syncthing, Dropbox, iCloud) mirrors.
+Run `hydra-acp archiver setup` on each machine that should sync. For Google Drive, log in with the **same Google account** and use the **same Drive folder name** so each machine points at the shared archive. For S3, point each machine at the same bucket. For filesystem, point each at a directory that some external sync tool (Syncthing, Dropbox, iCloud) mirrors.
 
 If you turned on encryption, copy `~/.hydra-acp/archiver-key` from your first machine to each peer; the wizard's fingerprint output lets you verify they match.
 
@@ -152,7 +169,7 @@ All three backends support optional AES-256-GCM encryption. When enabled, blobs 
 Generate a key on one machine:
 
 ```sh
-hydra-acp-archiver keygen
+hydra-acp archiver keygen
 ```
 
 This writes a 32-byte key as a hex file (mode 0600) and prints:
@@ -207,7 +224,7 @@ Set `HYDRA_ACP_ARCHIVER_HOST_ID` to override the default (`os.hostname()` saniti
 
 ### Key rotation and re-upload
 
-When encryption is enabled and you regenerate the key (`hydra-acp-archiver keygen`), the fingerprint prefix changes. The new prefix namespace is empty, so the cold sweep on the next daemon start re-uploads all sessions encrypted with the new key. Old blobs under the previous prefix are simply ignored — no decryption errors, no manual cleanup required (though you can delete the old prefix from the bucket/dir when convenient).
+When encryption is enabled and you regenerate the key (`hydra-acp archiver keygen`), the fingerprint prefix changes. The new prefix namespace is empty, so the cold sweep on the next daemon start re-uploads all sessions encrypted with the new key. Old blobs under the previous prefix are simply ignored — no decryption errors, no manual cleanup required (though you can delete the old prefix from the bucket/dir when convenient).
 
 ## Configuration file
 
@@ -296,13 +313,13 @@ Return `false` to skip an upload. Any other value (including `undefined`) archiv
 
 - `~/.hydra-acp/archiver-state.json` — per-lineage cache of last uploaded hash + last seen remote upload, used for self-loop suppression. Safe to delete; archiver will rebuild it.
 - `~/.hydra-acp/archiver-google-credentials.json` — OAuth client JSON you downloaded.
-- `~/.hydra-acp/archiver-google-token.json` — refresh + access token (mode 0600). Re-run `hydra-acp-archiver login` to refresh.
-- `~/.hydra-acp/archiver-key` — encryption key (mode 0600), written by `hydra-acp-archiver keygen`. Copy this file to every machine in your sync group. Keep it safe — losing it means losing access to encrypted blobs.
+- `~/.hydra-acp/archiver-google-token.json` — refresh + access token (mode 0600). Re-run `hydra-acp archiver login` to refresh.
+- `~/.hydra-acp/archiver-key` — encryption key (mode 0600), written by `hydra-acp archiver keygen`. Copy this file to every machine in your sync group. Keep it safe — losing it means losing access to encrypted blobs.
 
 ## Troubleshooting
 
 - **`Missing HYDRA_ACP_TOKEN env var`** — you ran the archiver directly instead of via the daemon. Run it as a registered extension.
-- **`No Google OAuth token at …`** — run `hydra-acp-archiver gdrive login` first.
+- **`No Google OAuth token at …`** — run `hydra-acp archiver gdrive login` first.
 - **`OAuth credentials file not found`** — follow the **First-time Google setup** steps to download the client JSON from GCP Console.
 - **Files aren't appearing in Drive** — check `~/.hydra-acp/extensions/hydra-acp-archiver.log` for errors. Common: consent-screen test-user list doesn't include your Google account.
 - **Two machines kept overwriting each other** — that's last-writer-wins working as designed if both are actively editing the same session. Avoid editing the same session on two machines simultaneously; one of them will lose its diff. A future `activeOn` claim-lock will close this gap.
