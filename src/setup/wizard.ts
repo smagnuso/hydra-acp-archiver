@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { loadLoginConfig } from "../config.js";
@@ -8,8 +8,7 @@ import { runKeygen } from "../keygen.js";
 import { runGoogleLogin } from "../oauth/google.js";
 import { loadAwsCredentials } from "../util/aws-credentials.js";
 import { mergeConf, PRIMARY_CONF_PATH, readExisting, writeConf } from "./conf-writer.js";
-import { formatAge, scanDownloadsForGoogleCredentials } from "./downloads-scan.js";
-import { ask, askSecret, confirm, openBrowser, pause, pickFromList } from "./prompts.js";
+import { ask, askSecret, confirm, pause, pickFromList } from "./prompts.js";
 
 type Backend = "google-drive" | "s3" | "fs";
 
@@ -172,78 +171,31 @@ async function step2PickBackend(): Promise<BackendChoice> {
 
 interface GoogleResult {
   driveFolder: string;
-  credentialsPath: string;
 }
 
 async function step3aGoogleDrive(): Promise<GoogleResult> {
   header(3, TOTAL_STEPS, "Configure Google Drive");
 
   const login = loadLoginConfig();
-  const credentialsPath = login.credentialsPath;
 
-  if (existsSync(credentialsPath)) {
-    ok(`Google OAuth credentials found at ${credentialsPath}.`);
-  } else {
-    info("First-time setup. You need an OAuth client from Google Cloud Console.");
-    blank();
-    info("  1. Pick or create a project");
-    info("  2. APIs & Services → Library → enable Google Drive API");
-    info("  3. OAuth consent screen → User type: External → add yourself as a Test User");
-    info("  4. Credentials → Create credentials → OAuth client ID → Application: Desktop app");
-    info("  5. Download the JSON (lands in ~/Downloads)");
-    blank();
-    await pause("Press Enter to open the Cloud Console...");
-    openBrowser("https://console.cloud.google.com/");
-    blank();
-    await pause("Press Enter once you've downloaded the JSON...");
-
-    const hit = scanDownloadsForGoogleCredentials();
-    let srcPath: string | undefined;
-    if (hit) {
-      blank();
-      info(`Found ${hit.path} (${formatAge(hit.ageMs)}).`);
-      if (await confirm("Use this file?", true))
-        srcPath = hit.path;
-    }
-    if (!srcPath) {
-      blank();
-      const manual = await ask("Path to the downloaded JSON");
-      if (!manual)
-        fail("A credentials file is required.");
-      srcPath = manual.startsWith("~/") ? manual.replace(/^~/, homedir()) : manual;
-    }
-    if (!existsSync(srcPath))
-      fail(`File not found: ${srcPath}`);
-
-    mkdirSync(HYDRA_HOME, { recursive: true });
-    copyFileSync(srcPath, credentialsPath);
-    try {
-      const { chmodSync } = await import("node:fs");
-      chmodSync(credentialsPath, 0o600);
-    } catch {
-      // chmod not meaningful on win32
-    }
-    ok(`Saved to ${credentialsPath} (chmod 600).`);
-  }
-
-  blank();
   const driveFolder = await ask("Drive folder name", DEFAULT_DRIVE_FOLDER);
 
   blank();
-  info("Now we run Google's OAuth flow. Your browser will open to a consent");
-  info("screen. The 'Google hasn't verified this app' interstitial is expected");
-  info("for a personal OAuth client — click 'Advanced' → 'Go to (unsafe)' → 'Allow'.");
+  info("Now we run Google's OAuth flow. Your browser will open to a Google");
+  info("consent screen — sign in and grant access to the hydra-acp-archiver app.");
+  info("The archiver uses the drive.file scope, so it can only see files it");
+  info("creates (not the rest of your Drive).");
   blank();
   await pause("Press Enter to start OAuth...");
 
   try {
-    await runGoogleLogin({ credentialsPath, tokenPath: login.tokenPath });
+    await runGoogleLogin({ tokenPath: login.tokenPath });
   } catch (err) {
     fail(`Google OAuth failed: ${(err as Error).message}`);
   }
   ok(`OAuth complete. Token saved to ${login.tokenPath}.`);
 
-  return { driveFolder, credentialsPath };
+  return { driveFolder };
 }
 
 interface S3Result {
@@ -384,7 +336,6 @@ interface Step5Args {
 async function step5WriteConfig(args: Step5Args): Promise<void> {
   header(5, TOTAL_STEPS, "Writing config");
 
-  const login = loadLoginConfig();
   const updates: Record<string, string | undefined> = {
     BACKEND: args.backend,
   };
@@ -392,8 +343,6 @@ async function step5WriteConfig(args: Step5Args): Promise<void> {
   if (args.backend === "google-drive" && args.google) {
     if (args.google.driveFolder !== DEFAULT_DRIVE_FOLDER)
       updates.DRIVE_FOLDER = args.google.driveFolder;
-    if (args.google.credentialsPath !== login.credentialsPath)
-      updates.GOOGLE_CREDENTIALS = args.google.credentialsPath;
   } else if (args.backend === "s3" && args.s3) {
     updates.S3_BUCKET = args.s3.bucket;
     if (args.s3.region)

@@ -58,9 +58,8 @@ const TRUTHY = new Set(["1", "true", "yes", "on", "t"]);
 async function runLogin(): Promise<void> {
   setDebug(TRUTHY.has((process.env.DEBUG ?? "").toLowerCase()));
   const cfg = loadLoginConfig();
-  log.info(`credentials=${cfg.credentialsPath} token=${cfg.tokenPath}`);
+  log.info(`token=${cfg.tokenPath}`);
   await runGoogleLogin({
-    credentialsPath: cfg.credentialsPath,
     tokenPath: cfg.tokenPath,
   });
   log.info("login complete — you can now start the archiver extension");

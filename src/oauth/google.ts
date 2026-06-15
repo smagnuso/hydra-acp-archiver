@@ -14,15 +14,13 @@ const log = logger("oauth");
 // content invisible to the archiver.
 const SCOPES = ["https://www.googleapis.com/auth/drive.file"];
 
-interface ClientCreds {
-  client_id: string;
-  client_secret: string;
-}
-
-interface CredentialsFile {
-  installed?: ClientCreds & { redirect_uris?: string[] };
-  web?: ClientCreds & { redirect_uris?: string[] };
-}
+// Embedded OAuth client for the published hydra-acp-archiver app. For
+// installed/desktop OAuth clients the "secret" is not actually secret —
+// Google's docs state plainly that desktop apps cannot keep it
+// confidential. The real security boundary is the loopback redirect +
+// explicit user consent, not this string.
+const CLIENT_ID = "774694216181-tq9raja8oij25bb0okq00g5fvg002u3k.apps.googleusercontent.com";
+const CLIENT_SECRET = "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";
 
 interface StoredToken {
   refresh_token?: string | null;
@@ -31,37 +29,6 @@ interface StoredToken {
   token_type?: string | null;
   expiry_date?: number | null;
   id_token?: string | null;
-}
-
-const CREDS_HINT = `
-Set up Google OAuth credentials first:
-  1. Visit https://console.cloud.google.com/
-  2. Create or select a project, then enable the Google Drive API
-  3. Configure OAuth consent screen (User type: External; add yourself as a Test User)
-  4. Create credentials -> OAuth client ID -> Application type: Desktop app
-  5. Download the JSON and save it to ~/.hydra-acp/archiver-google-credentials.json
-     (or set HYDRA_ACP_ARCHIVER_GOOGLE_CREDENTIALS)
-`;
-
-async function loadCredentials(path: string): Promise<ClientCreds> {
-  let text: string;
-  try {
-    text = await readFile(path, "utf8");
-  } catch (err) {
-    const e = err as NodeJS.ErrnoException;
-    if (e.code === "ENOENT") {
-      throw new Error(`OAuth credentials file not found at ${path}.\n${CREDS_HINT}`);
-    }
-    throw err;
-  }
-  const parsed = JSON.parse(text) as CredentialsFile;
-  const c = parsed.installed ?? parsed.web;
-  if (!c || !c.client_id || !c.client_secret) {
-    throw new Error(
-      `OAuth credentials at ${path} missing client_id/client_secret.\n${CREDS_HINT}`,
-    );
-  }
-  return { client_id: c.client_id, client_secret: c.client_secret };
 }
 
 async function loadToken(path: string): Promise<StoredToken | undefined> {
@@ -112,24 +79,22 @@ function tryOpenBrowser(url: string): void {
 }
 
 export interface GoogleAuthOptions {
-  credentialsPath: string;
   tokenPath: string;
 }
 
-// Runtime-side: load creds + token, return an OAuth2Client that
-// auto-refreshes its access token. Throws with a clear message if the
-// user hasn't run the login flow yet.
+// Runtime-side: load token, return an OAuth2Client that auto-refreshes
+// its access token. Throws with a clear message if the user hasn't run
+// the login flow yet.
 export async function loadGoogleAuth(
   opts: GoogleAuthOptions,
 ): Promise<OAuth2Client> {
-  const creds = await loadCredentials(opts.credentialsPath);
   const token = await loadToken(opts.tokenPath);
   if (!token || !token.refresh_token) {
     throw new Error(
       `No Google OAuth token at ${opts.tokenPath}. Run \`hydra-acp-archiver-login\` first.`,
     );
   }
-  const client = new google.auth.OAuth2(creds.client_id, creds.client_secret);
+  const client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET);
   client.setCredentials(token);
   // Persist refreshed tokens whenever google-auth-library issues a new
   // access token, so we keep the latest expiry on disk for future runs.
@@ -147,16 +112,14 @@ export async function loadGoogleAuth(
 export async function runGoogleLogin(
   opts: GoogleAuthOptions,
 ): Promise<void> {
-  const creds = await loadCredentials(opts.credentialsPath);
-
   // Bind loopback server first so we can build the redirect_uri with
   // the assigned port.
   const { port, codePromise, close } = await startCallbackServer();
   const redirectUri = `http://127.0.0.1:${port}`;
 
   const client = new google.auth.OAuth2(
-    creds.client_id,
-    creds.client_secret,
+    CLIENT_ID,
+    CLIENT_SECRET,
     redirectUri,
   );
   const authUrl = client.generateAuthUrl({

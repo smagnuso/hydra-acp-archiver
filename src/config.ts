@@ -29,10 +29,6 @@ export interface Config {
   prefix: string;
   hostId: string;
   encryptionKeyPath: string | undefined;
-  // OAuth client credentials downloaded from GCP Console (the
-  // {installed: {...}} JSON). User-supplied; archiver doesn't ship its
-  // own credentials. See README.
-  credentialsPath: string;
   // OAuth refresh + access token, written by the login bin.
   tokenPath: string;
   statePath: string;
@@ -177,10 +173,6 @@ export function loadConfig(): Config {
     "HYDRA_ACP_ARCHIVER_CONFIG", "CONFIG", conf,
     resolve(hydraHome, "archiver.config.js"),
   );
-  const credentialsPath = str(
-    "HYDRA_ACP_ARCHIVER_GOOGLE_CREDENTIALS", "GOOGLE_CREDENTIALS", conf,
-    resolve(hydraHome, "archiver-google-credentials.json"),
-  );
   const tokenPath = resolve(hydraHome, "archiver-google-token.json");
   const statePath = resolve(hydraHome, "archiver-state.json");
 
@@ -212,7 +204,6 @@ export function loadConfig(): Config {
       .toLowerCase()
       .replace(/[^a-z0-9-]/g, "-"),
     encryptionKeyPath: optStr("HYDRA_ACP_ARCHIVER_KEY_PATH", "KEY_PATH", conf),
-    credentialsPath,
     tokenPath,
     statePath,
     toolContent: parseToolContent(
@@ -255,20 +246,13 @@ export async function loadEncryptionKey(
 
 export interface LoginConfig {
   hydraHome: string;
-  credentialsPath: string;
   tokenPath: string;
 }
 
 export function loadLoginConfig(): LoginConfig {
   const hydraHome = process.env.HYDRA_ACP_HOME ?? resolve(homedir(), ".hydra-acp");
-  const conf = readConf(confPath(hydraHome));
-  const credentialsPath = str(
-    "HYDRA_ACP_ARCHIVER_GOOGLE_CREDENTIALS", "GOOGLE_CREDENTIALS", conf,
-    resolve(hydraHome, "archiver-google-credentials.json"),
-  );
   return {
     hydraHome,
-    credentialsPath,
     tokenPath: resolve(hydraHome, "archiver-google-token.json"),
   };
 }

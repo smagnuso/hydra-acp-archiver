@@ -10,7 +10,6 @@ export function makeBackend(config: Config): SyncBackend {
       return new FsBackend({ dir: config.fsDir, prefix: config.prefix });
     case "google-drive":
       return new GoogleDriveBackend({
-        credentialsPath: config.credentialsPath,
         tokenPath: config.tokenPath,
         folderName: config.driveFolderName,
         prefix: config.prefix,

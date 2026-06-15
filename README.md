@@ -64,15 +64,10 @@ Re-run `hydra-acp archiver setup` any time to switch backends or rotate keys —
 
 The Google Drive backend uses OAuth 2.0 with the **`drive.file`** scope — the archiver can only see files it creates plus those you explicitly hand it via a picker. Your other Drive contents stay invisible to it.
 
-You provide your own OAuth client (Google's terms make it impractical to ship a shared one):
+The archiver ships with an embedded OAuth client (the published `hydra-acp-archiver` app), so there's no Cloud Console setup on your end:
 
-1. Go to <https://console.cloud.google.com/> and create or pick a project.
-2. Enable the **Google Drive API** for that project.
-3. Configure the **OAuth consent screen**. User type: **External**. Add your Google account under **Test Users**.
-4. **Credentials → Create credentials → OAuth client ID**. Application type: **Desktop app**.
-5. Download the resulting JSON and save it to `~/.hydra-acp/archiver-google-credentials.json` (or anywhere, and set `HYDRA_ACP_ARCHIVER_GOOGLE_CREDENTIALS`).
-6. Run `hydra-acp archiver gdrive login`. Your browser opens to Google's consent screen. The "Google hasn't verified this app" interstitial is expected for an unverified personal-use client — click **Advanced → Go to (unsafe)** and approve. The redirect lands on a transient local server, the archiver writes `~/.hydra-acp/archiver-google-token.json` (mode 0600), and you're done.
-7. Register: `hydra-acp extensions add hydra-acp-archiver`.
+1. Run `hydra-acp archiver gdrive login`. Your browser opens to Google's consent screen — sign in and grant access. The redirect lands on a transient local server, the archiver writes `~/.hydra-acp/archiver-google-token.json` (mode 0600), and you're done.
+2. Register: `hydra-acp extensions add hydra-acp-archiver`.
 
 After this, restart the daemon. The archiver process starts up, creates a `hydra-acp-archive/` folder in your Drive on first upload, and begins syncing.
 
@@ -249,7 +244,6 @@ KEY_PATH=/home/you/.hydra-acp/archiver-key
 HOST_ID=alice-macbook
 
 # Google Drive
-# GOOGLE_CREDENTIALS=/home/you/.hydra-acp/archiver-google-credentials.json
 # DRIVE_FOLDER=hydra-acp-archive
 
 # Tuning (rarely needed)
@@ -276,7 +270,6 @@ The file is optional — if it doesn't exist the archiver falls back to environm
 | `HYDRA_ACP_ARCHIVER_PREFIX` | auto (fingerprint or username) | User-level namespace prefix applied by all backends |
 | `HYDRA_ACP_ARCHIVER_HOST_ID` | `os.hostname()` (sanitized) | Host identifier used as a subdirectory under the user prefix |
 | `HYDRA_ACP_ARCHIVER_KEY_PATH` | — | Path to encryption key file; if unset, encryption is off |
-| `HYDRA_ACP_ARCHIVER_GOOGLE_CREDENTIALS` | `~/.hydra-acp/archiver-google-credentials.json` | OAuth client JSON from GCP |
 | `HYDRA_ACP_ARCHIVER_CONFIG` | `~/.hydra-acp/archiver.config.js` | Rule file (optional) |
 | `HYDRA_ACP_ARCHIVER_POLL_MS` | `2000` | Session discovery cadence |
 | `HYDRA_ACP_ARCHIVER_DEBOUNCE_MS` | `5000` | Per-session upload debounce window |

@@ -10,7 +10,6 @@ const FOLDER_MIME = "application/vnd.google-apps.folder";
 const FILE_MIME = "application/json";
 
 export interface GoogleDriveBackendOptions {
-  credentialsPath: string;
   tokenPath: string;
   folderName: string;
   prefix: string;
@@ -38,7 +37,6 @@ export class GoogleDriveBackend implements SyncBackend {
 
   async init(): Promise<void> {
     const auth = await loadGoogleAuth({
-      credentialsPath: this.opts.credentialsPath,
       tokenPath: this.opts.tokenPath,
     });
     this.drive = google.drive({ version: "v3", auth });
