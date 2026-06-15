@@ -170,6 +170,11 @@ export interface SessionMeta {
   cwd?: string;
   agentId?: string;
   title?: string;
+  // Tristate from the daemon — see HydraSessionInfo.interactive in
+  // discovery.ts. The default rule treats anything other than `true` as
+  // skip, so transformer-spawned workers (`false`) and never-promoted
+  // ancillaries (`undefined`) stay off the backend by default.
+  interactive?: boolean;
 }
 
 function defaultHost(): HostInfo {

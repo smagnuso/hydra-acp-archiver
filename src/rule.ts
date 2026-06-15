@@ -11,6 +11,13 @@ export interface ArchiveEvent {
     cwd?: string;
     agentId?: string;
     title?: string;
+    // Tristate from the daemon's session/list view (effectiveInteractive).
+    // Sessions that aren't explicitly `true` carry no value worth uploading:
+    //   false     — transformer-spawned workers, cat one-shots
+    //   undefined — never promoted (empty editor panels, peer imports without
+    //               an explicit interactive flag in their bundle)
+    // Users who want different behaviour can override via the rule config.
+    interactive?: boolean;
   };
 }
 
@@ -20,7 +27,12 @@ export type RuleFunction = (
   ev: ArchiveEvent,
 ) => boolean | undefined | Promise<boolean | undefined>;
 
-export const DEFAULT_RULE: RuleFunction = () => true;
+// Default policy: only archive sessions the daemon considers interactive.
+// Drops transformer-spawned workers and never-promoted ancillaries, which
+// empirically were the only populations leaking through the daemon's own
+// list filter (see audit notes — 45/49 undefined-interactive sessions were
+// being uploaded with no clear value, vs 0/111 explicit interactive:false).
+export const DEFAULT_RULE: RuleFunction = (ev) => ev.meta.interactive === true;
 
 let loadCounter = 0;
 
@@ -31,7 +43,7 @@ export async function loadRule(path: string): Promise<RuleFunction> {
     const e = err as NodeJS.ErrnoException;
     if (e.code === "ENOENT") {
       log.info(
-        `no rule config at ${path} — archiving every live session (drop a JS file at that path to opt out specific sessions)`,
+        `no rule config at ${path} — archiving only sessions the daemon marks interactive=true (drop a JS file at that path to customize)`,
       );
       return DEFAULT_RULE;
     }

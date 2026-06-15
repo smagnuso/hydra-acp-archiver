@@ -10,6 +10,13 @@ export interface HydraSessionInfo {
   attachedClients: number;
   updatedAt: string;
   status: "live" | "cold";
+  // Tri-state from the daemon's session/list response. Reflects the
+  // derived effectiveInteractive() value at list time:
+  //   true       — explicitly interactive, or undefined+hasContent
+  //   false      — explicit (cat one-shots, transformer-spawned children)
+  //   undefined  — never set and no history content yet
+  // The archiver only uploads sessions that are explicitly interactive.
+  interactive?: boolean;
   // Provenance. When importedFromMachine is set and upstreamSessionId is
   // empty the session is a passive mirror — pulled from a peer, never
   // opened locally. Re-uploading it would ping-pong, so the cold sweep

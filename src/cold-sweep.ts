@@ -42,6 +42,7 @@ export async function runColdSweep(
       ...(s.cwd !== undefined ? { cwd: s.cwd } : {}),
       ...(s.agentId !== undefined ? { agentId: s.agentId } : {}),
       ...(s.title !== undefined ? { title: s.title } : {}),
+      ...(s.interactive !== undefined ? { interactive: s.interactive } : {}),
     });
     try {
       await opts.archive.flushNow(s.sessionId);

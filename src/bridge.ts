@@ -88,9 +88,16 @@ export class ArchiverBridge {
       next.title = update.title;
       changed = true;
     }
-    const agentId = readHydraAgentId(update._meta);
+    const hydra = readHydraMeta(update._meta);
+    const agentId = typeof hydra?.agentId === "string" ? hydra.agentId : undefined;
     if (agentId !== undefined && next.agentId !== agentId) {
       next.agentId = agentId;
+      changed = true;
+    }
+    const interactive =
+      typeof hydra?.interactive === "boolean" ? hydra.interactive : undefined;
+    if (interactive !== undefined && next.interactive !== interactive) {
+      next.interactive = interactive;
       changed = true;
     }
     if (changed) {
@@ -109,7 +116,7 @@ export class ArchiverBridge {
   }
 }
 
-function readHydraAgentId(meta: unknown): string | undefined {
+function readHydraMeta(meta: unknown): Record<string, unknown> | undefined {
   if (!meta || typeof meta !== "object" || Array.isArray(meta)) {
     return undefined;
   }
@@ -117,6 +124,5 @@ function readHydraAgentId(meta: unknown): string | undefined {
   if (!ns || typeof ns !== "object" || Array.isArray(ns)) {
     return undefined;
   }
-  const v = (ns as Record<string, unknown>).agentId;
-  return typeof v === "string" ? v : undefined;
+  return ns as Record<string, unknown>;
 }

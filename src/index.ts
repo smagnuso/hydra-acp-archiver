@@ -182,6 +182,9 @@ async function runExtension(): Promise<void> {
             ? { agentId: session.agentId }
             : {}),
           ...(session.title !== undefined ? { title: session.title } : {}),
+          ...(session.interactive !== undefined
+            ? { interactive: session.interactive }
+            : {}),
         },
         archive,
       });

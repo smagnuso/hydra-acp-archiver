@@ -8,7 +8,7 @@ import { DEFAULT_RULE, loadRule } from "../src/rule.js";
 const EV = {
   sessionId: "s1",
   lineageId: "hydra_lineage_aaaa",
-  meta: { cwd: "/tmp", title: "demo" },
+  meta: { cwd: "/tmp", title: "demo", interactive: true as const },
 };
 
 test("loadRule returns DEFAULT_RULE when file is missing", async () => {
@@ -16,9 +16,22 @@ test("loadRule returns DEFAULT_RULE when file is missing", async () => {
   assert.equal(fn, DEFAULT_RULE);
 });
 
-test("DEFAULT_RULE archives every session", async () => {
+test("DEFAULT_RULE archives interactive=true sessions", async () => {
   const r = await DEFAULT_RULE(EV);
   assert.equal(r, true);
+});
+
+test("DEFAULT_RULE skips interactive=false sessions", async () => {
+  const r = await DEFAULT_RULE({ ...EV, meta: { ...EV.meta, interactive: false } });
+  assert.equal(r, false);
+});
+
+test("DEFAULT_RULE skips interactive=undefined sessions", async () => {
+  const r = await DEFAULT_RULE({
+    ...EV,
+    meta: { cwd: "/tmp", title: "demo" },
+  });
+  assert.equal(r, false);
 });
 
 test("loadRule imports a JS module's default export", async () => {
