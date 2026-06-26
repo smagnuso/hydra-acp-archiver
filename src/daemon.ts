@@ -34,7 +34,7 @@ export class DaemonClient {
   // includeNonInteractive=1 is required: the daemon's default list
   // filters out cold/non-interactive sessions, which includes our
   // freshly-imported ones. Without this flag, the pull loop would
-  // mis-classify live imports as "deleted" and re-import them forever.
+  // mis-classify warm imports as "deleted" and re-import them forever.
   async listSessionIds(): Promise<Set<string>> {
     const r = await fetch(
       `${this.opts.daemonUrl}/v1/sessions?includeNonInteractive=1`,

@@ -26,7 +26,7 @@ async function startFakeDaemon(
     cwd?: string;
     agentId?: string;
     title?: string;
-    status: "live" | "cold";
+    status: "warm" | "cold";
     importedFromMachine?: string;
     upstreamSessionId?: string;
   }>,
@@ -49,10 +49,10 @@ async function startFakeDaemon(
   };
 }
 
-test("cold sweep exports cold sessions and skips live ones", async () => {
+test("cold sweep exports cold sessions and skips warm ones", async () => {
   const dir = mkdtempSync(join(tmpdir(), "archiver-cold-"));
   const daemonStub = await startFakeDaemon([
-    { sessionId: "s_live", cwd: "/w/live", status: "live" },
+    { sessionId: "s_live", cwd: "/w/live", status: "warm" },
     { sessionId: "s_cold1", cwd: "/w/c1", status: "cold" },
     { sessionId: "s_cold2", cwd: "/w/c2", status: "cold" },
   ]);

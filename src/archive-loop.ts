@@ -56,7 +56,7 @@ export class ArchiveLoop {
   }
 
   // Cancel any pending debounced upload and synchronously run one final
-  // flush — used when a session transitions live → cold so we capture
+  // flush — used when a session transitions warm → cold so we capture
   // its last state. Errors are logged, not thrown, so callers can
   // fire-and-forget. The session's meta is dropped after the flush
   // resolves.

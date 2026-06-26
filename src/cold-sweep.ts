@@ -26,7 +26,7 @@ export async function runColdSweep(
   let cold = 0;
   let skippedMirrors = 0;
   for (const s of sessions) {
-    if (s.status === "live") {
+    if (s.status === "warm") {
       continue;
     }
     // Passive mirror: imported from a peer, never opened locally. No

@@ -9,7 +9,7 @@ export interface HydraSessionInfo {
   title: string | undefined;
   attachedClients: number;
   updatedAt: string;
-  status: "live" | "cold";
+  status: "warm" | "cold";
   // Tri-state from the daemon's session/list response. Reflects the
   // derived effectiveInteractive() value at list time:
   //   true       — explicitly interactive, or undefined+hasContent
@@ -77,7 +77,7 @@ export class HydraDiscovery {
       const body = (await r.json()) as { sessions: HydraSessionInfo[] };
       const seen = new Map<string, HydraSessionInfo>();
       for (const s of body.sessions) {
-        if (s.status !== "live") {
+        if (s.status !== "warm") {
           continue;
         }
         seen.set(s.sessionId, s);
