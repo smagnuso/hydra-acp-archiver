@@ -29,8 +29,6 @@ Commands:
   setup          Interactive first-run wizard — picks a backend, sets up
                  OAuth/credentials/encryption, writes archiver.conf, and
                  (optionally) registers the extension with hydra.
-  (no args)      Run as a daemon-managed extension (the daemon spawns it
-                 this way automatically when registered).
   gdrive login   Interactive Google OAuth flow — opens a browser and writes
                  the refresh token to ~/.hydra-acp/archiver-google-token.json.
   keygen         Generate a symmetric encryption key and write it to
@@ -257,7 +255,16 @@ async function main(): Promise<void> {
     return;
   }
   if (cmd === undefined) {
-    await runExtension();
+    // Extension mode is only appropriate when the daemon spawned us,
+    // signalled by HYDRA_ACP_TOKEN in the environment (see child-supervisor).
+    // A user running this binary in a shell almost certainly wants help,
+    // not to start a rogue background process that duplicates the
+    // daemon-managed one.
+    if (process.env.HYDRA_ACP_TOKEN) {
+      await runExtension();
+      return;
+    }
+    process.stdout.write(USAGE);
     return;
   }
   if (cmd === "gdrive") {
