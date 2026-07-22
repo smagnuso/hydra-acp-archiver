@@ -155,17 +155,37 @@ function parseBackend(raw: string): BackendKind {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-export function loadConfig(): Config {
+function readDaemonUrl(hydraHome: string): string | undefined {
+  try {
+    const raw = readFileSync(resolve(hydraHome, "daemon.pid"), "utf8");
+    const info = JSON.parse(raw) as { host?: string; loopbackPort?: number; port?: number };
+    const port = info.loopbackPort ?? info.port;
+    if (typeof port !== "number") return undefined;
+    return `http://127.0.0.1:${port}`;
+  } catch {
+    return undefined;
+  }
+}
+
+export function loadConfig(opts: { requireToken?: boolean } = {}): Config {
+  const requireToken = opts.requireToken ?? true;
+  const hydraHome = process.env.HYDRA_ACP_HOME ?? resolve(homedir(), ".hydra-acp");
   const hydraDaemonUrl =
-    process.env.HYDRA_ACP_DAEMON_URL ?? "http://127.0.0.1:8765";
-  const hydraToken = process.env.HYDRA_ACP_TOKEN ?? "";
+    process.env.HYDRA_ACP_DAEMON_URL ?? readDaemonUrl(hydraHome) ?? "http://127.0.0.1:8765";
+  let hydraToken = process.env.HYDRA_ACP_TOKEN ?? "";
   if (!hydraToken) {
+    try {
+      hydraToken = readFileSync(resolve(hydraHome, "auth-token"), "utf8").trim();
+    } catch {
+    }
+  }
+  if (!hydraToken && requireToken) {
     throw new Error(
-      "Missing HYDRA_ACP_TOKEN env var. When run as a hydra extension, hydra injects this automatically.",
+      "Missing HYDRA_ACP_TOKEN env var and no auth-token file. When run as a hydra extension, hydra injects the token automatically.",
     );
   }
   const hydraWsUrl = process.env.HYDRA_ACP_WS_URL ?? deriveWsUrl(hydraDaemonUrl);
-  const hydraHome = process.env.HYDRA_ACP_HOME ?? resolve(homedir(), ".hydra-acp");
+
 
   const conf = readConf(confPath(hydraHome));
 

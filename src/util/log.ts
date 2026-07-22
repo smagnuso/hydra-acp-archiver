@@ -8,7 +8,7 @@ export function setDebug(on: boolean): void {
 
 function emit(level: Level, scope: string, args: unknown[]): void {
   const ts = new Date().toISOString();
-  const stream = level === "error" || level === "warn" ? process.stderr : process.stdout;
+  const stream = level === "debug" ? process.stdout : process.stderr;
   stream.write(`[${ts}] ${level} [${scope}] ${formatArgs(args)}\n`);
 }
 

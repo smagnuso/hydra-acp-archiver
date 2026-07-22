@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import type { SyncBackend } from "./backend/types.js";
+import { resolvePrefix } from "./prefix.js";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ArchiveLoop } from "./archive-loop.js";
@@ -35,6 +35,26 @@ Commands:
                  the refresh token to ~/.hydra-acp/archiver-google-token.json.
   keygen         Generate a symmetric encryption key and write it to
                  HYDRA_ACP_ARCHIVER_KEY_PATH (or ~/.hydra-acp/archiver-key).
+  restore list [--host <h>] [--agent <a>] [--cwd <s>] [--grep <s>]
+               [--since <7d|iso>] [--limit <n>] [--fast] [--json]
+               [--only-remote | --only-local]
+                 List every bundle in the backend (across all hosts).
+                 Default decrypts each envelope to show title/cwd/agent;
+                 --fast skips decryption for a metadata-only view. Bundles
+                 that already exist locally are marked LOCAL=yes and pulled
+                 from meta.json instead of the backend (free hydration).
+                 --only-remote hides local-known lineages so you see just
+                 the ones you'd need to pull to get back.
+  restore pull <lineageId> [--host <h>] [--to <file>|-] [--import]
+               [--no-replace] [--cwd <path>] [--force]
+                 Fetch a bundle by lineage. <lineageId> may include or omit
+                 the hydra_lineage_ prefix. If a session with this lineage
+                 already exists locally, prints its id and skips the
+                 network unless --force. Otherwise writes the raw .hydra
+                 bundle to <file> or stdout; --import POSTs it to the
+                 daemon's /v1/sessions/import (implies replace=true unless
+                 --no-replace). If multiple hosts have this lineage, the
+                 newest wins; use --host to disambiguate.
 
 Flags:
   --version, -v   Print version and exit.
@@ -72,13 +92,10 @@ async function runExtension(): Promise<void> {
   const encryptionKey = await loadEncryptionKey(config.encryptionKeyPath);
 
   if (config.prefix === "") {
-    if (encryptionKey !== undefined) {
-      config.prefix = createHash("sha256").update(encryptionKey).digest().subarray(0, 8).toString("hex") + "/";
-      log.info(`auto-prefix (key fingerprint): ${config.prefix}`);
-    } else {
-      config.prefix = userInfo().username.toLowerCase().replace(/[^a-z0-9-]/g, "-") + "/";
-      log.info(`auto-prefix (username): ${config.prefix}`);
-    }
+    config.prefix = resolvePrefix(config.prefix, encryptionKey);
+    log.info(
+      `auto-prefix (${encryptionKey !== undefined ? "key fingerprint" : "username"}): ${config.prefix}`,
+    );
   }
 
   const state = new SyncState(config.statePath);
@@ -266,6 +283,26 @@ async function main(): Promise<void> {
   if (cmd === "keygen") {
     await runKeygen();
     return;
+  }
+  if (cmd === "restore") {
+    const sub = process.argv[3];
+    const rest = process.argv.slice(4);
+    const { parseListArgs, parsePullArgs, runRestoreList, runRestorePull } =
+      await import("./restore.js");
+    if (sub === "list") {
+      await runRestoreList(parseListArgs(rest));
+      return;
+    }
+    if (sub === "pull") {
+      await runRestorePull(parsePullArgs(rest));
+      return;
+    }
+    process.stderr.write(
+      sub !== undefined
+        ? `hydra-acp-archiver restore: unknown subcommand "${sub}"\n\nAvailable: list, pull\n`
+        : `hydra-acp-archiver restore: missing subcommand\n\nAvailable: list, pull\n`,
+    );
+    process.exit(2);
   }
   if (cmd === "setup") {
     const { runSetup } = await import("./setup/wizard.js");
