@@ -67,7 +67,7 @@ export class HydraDiscovery {
     }
     this.inFlight = true;
     try {
-      const r = await fetch(`${this.opts.daemonUrl}/v1/sessions`, {
+      const r = await fetch(`${this.opts.daemonUrl}/v1/sessions?status=warm`, {
         headers: { Authorization: `Bearer ${this.opts.token}` },
       });
       if (!r.ok) {
@@ -75,6 +75,19 @@ export class HydraDiscovery {
         return;
       }
       const body = (await r.json()) as { sessions: HydraSessionInfo[] };
+      // `status=warm`: only LIVE sessions, answered from the daemon's
+      // in-memory map without reading the session store. This poll runs
+      // every couple of seconds forever, and the unfiltered view costs the
+      // daemon ~127ms of CPU and half a megabyte per uncached call once an
+      // install has a thousand cold records — all to produce rows discarded
+      // immediately below.
+      //
+      // NOT the same call as DaemonClient.listSessionIds, which needs the
+      // full list (it detects deletions by absence, so a warm-only view
+      // would look like every cold session had vanished).
+      //
+      // The status check stays as a belt: a daemon predating the parameter
+      // ignores it and returns everything.
       const seen = new Map<string, HydraSessionInfo>();
       for (const s of body.sessions) {
         if (s.status !== "warm") {
