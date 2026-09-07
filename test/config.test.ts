@@ -224,9 +224,14 @@ test("loadEncryptionKey: invalid-content error includes the path", async () => {
   const { dir, cleanup } = fixture();
   try {
     const p = writeKey(dir, "bad content");
+    // Containment, not a regex built from a path. A Windows path is full
+    // of backslashes, which a RegExp reads as escapes rather than as
+    // literals, so the pattern silently stops matching the very string it
+    // was made from. (The old escaping was also only replacing the first
+    // separator, String.replace with a string argument not being global.)
     await assert.rejects(
       () => loadEncryptionKey(p),
-      new RegExp(dir.replace("/", "\\/")),
+      (err: unknown) => err instanceof Error && err.message.includes(dir),
     );
   } finally {
     cleanup();
