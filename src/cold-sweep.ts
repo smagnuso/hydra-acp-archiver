@@ -1,5 +1,6 @@
 import type { ArchiveLoop } from "./archive-loop.js";
 import type { HydraSessionInfo } from "./discovery.js";
+import type { SyncState } from "./state.js";
 import { logger } from "./util/log.js";
 
 const log = logger("cold-sweep");
@@ -8,6 +9,7 @@ export interface ColdSweepOptions {
   daemonUrl: string;
   token: string;
   archive: ArchiveLoop;
+  state: SyncState;
 }
 
 export interface ColdSweepLoopOptions extends ColdSweepOptions {
@@ -41,6 +43,21 @@ export async function runColdSweep(
       skippedMirrors += 1;
       continue;
     }
+    // Fast path: the daemon bumps updatedAt on every mutation (priority
+    // PATCH included), so a session whose updatedAt we already swept is
+    // byte-identical to the last export — skip re-exporting it entirely.
+    // Unchanged content would hash-identical anyway; this just avoids the
+    // export+serialize round-trip for the (thousands of) untouched cold
+    // sessions. Sessions without an updatedAt (older daemons) are never
+    // skipped, degrading to always-export.
+    const lastSeen = opts.state.getSweepSeen(s.sessionId);
+    if (
+      s.updatedAt !== undefined &&
+      lastSeen !== undefined &&
+      s.updatedAt <= lastSeen
+    ) {
+      continue;
+    }
     cold += 1;
     opts.archive.setMeta(s.sessionId, {
       ...(s.cwd !== undefined ? { cwd: s.cwd } : {}),
@@ -50,6 +67,11 @@ export async function runColdSweep(
     });
     try {
       await opts.archive.flushNow(s.sessionId);
+      // Only advance the bookmark after the export succeeded, so a
+      // session that fails this tick is retried on the next one.
+      if (s.updatedAt !== undefined) {
+        await opts.state.setSweepSeen(s.sessionId, s.updatedAt);
+      }
     } catch (err) {
       log.warn(
         `cold sweep flush ${s.sessionId} failed: ${(err as Error).message}`,
@@ -80,11 +102,11 @@ async function listSessions(
 // one-shot behavior) and then re-scans every intervalMs. This is what
 // propagates metadata-only changes (priority, title) on cold sessions:
 // the daemon broadcasts nothing for a priority PATCH, so without this
-// re-scan a cleared/raised pin would never re-export. flushNow's
-// hash-dedup keeps unchanged sessions as no-ops, so the periodic cost is
-// a list call plus an export per native cold session, not a backend
-// write per change. The timer is .unref()ed — a pending sweep must not
-// keep the process alive.
+// re-scan a cleared/raised pin would never re-export. Each tick skips
+// untouched cold sessions via the updatedAt bookmark in state.json, so
+// the steady-state cost is one list call plus an export per actually-
+// changed session — not a backend write to every cold session. The timer
+// is .unref()ed — a pending sweep must not keep the process alive.
 export function startColdSweepLoop(opts: ColdSweepLoopOptions): () => void {
   let stopped = false;
   let inFlight = false;

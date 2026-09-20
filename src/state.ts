@@ -22,10 +22,18 @@ interface StateFile {
   prefix: string;
   backend: string;
   lineages: Record<string, LineageState>;
+  // sessionId -> last updatedAt observed by the periodic cold sweep.
+  // Lets the sweep skip re-exporting a cold session whose daemon-reported
+  // updatedAt hasn't moved since the last tick instead of exporting and
+  // re-hashing every cold session on every interval (thousands of
+  // multi-MB exports on big installs). Persisted so a daemon/extension
+  // restart doesn't force a full resweep. Only advanced after a
+  // successful export, so a failing session retries on the next tick.
+  coldSweepSeen: Record<string, string>;
 }
 
 function emptyState(appVersion: string, prefix: string, backend: string): StateFile {
-  return { appVersion, prefix, backend, lineages: {} };
+  return { appVersion, prefix, backend, lineages: {}, coldSweepSeen: {} };
 }
 
 // All writes go through a single in-process queue so concurrent
@@ -54,6 +62,7 @@ export class SyncState {
       this.cache.appVersion = appVersion;
       this.cache.prefix = prefix;
       this.cache.backend = backend;
+      this.cache.coldSweepSeen = parsed.coldSweepSeen ?? {};
 
       const versionChanged = storedVersion !== appVersion;
       const namespaceChanged = storedPrefix !== prefix || storedBackend !== backend;
@@ -107,6 +116,21 @@ export class SyncState {
     if (!this.cache)
       throw new Error("SyncState.lineageIds called before load()");
     return Object.keys(this.cache.lineages);
+  }
+
+  getSweepSeen(sessionId: string): string | undefined {
+    if (!this.cache) {
+      throw new Error("SyncState.getSweepSeen called before load()");
+    }
+    return this.cache.coldSweepSeen[sessionId];
+  }
+
+  setSweepSeen(sessionId: string, updatedAt: string): Promise<void> {
+    if (!this.cache) {
+      throw new Error("SyncState.setSweepSeen called before load()");
+    }
+    this.cache.coldSweepSeen[sessionId] = updatedAt;
+    return this.flush();
   }
 
   // Clear pull-side state for a lineage whose imported session was deleted,

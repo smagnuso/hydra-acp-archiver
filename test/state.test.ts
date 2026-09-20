@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SyncState } from "../src/state.js";
@@ -19,6 +19,29 @@ test("load creates empty state when file missing", async () => {
     const s = new SyncState(path);
     await s.load("0.0.0", "", "fs");
     assert.deepEqual(s.get("anything"), {});
+  } finally {
+    cleanup();
+  }
+});
+
+test("cold sweep bookmark set/get persists and reloads; old state files default to empty", async () => {
+  const { path, cleanup } = tmpStatePath();
+  try {
+    const a = new SyncState(path);
+    await a.load("0.0.0", "", "fs");
+    assert.equal(a.getSweepSeen("s_nope"), undefined);
+    await a.setSweepSeen("s1", "2026-09-02T00:00:00.000Z");
+
+    const b = new SyncState(path);
+    await b.load("0.0.0", "", "fs");
+    assert.equal(b.getSweepSeen("s1"), "2026-09-02T00:00:00.000Z");
+    assert.equal(b.getSweepSeen("s2"), undefined);
+
+    // A state file predating the bookmark section must load cleanly.
+    writeFileSync(path, JSON.stringify({ appVersion: "0.0.0", prefix: "", backend: "fs", lineages: {} }));
+    const c = new SyncState(path);
+    await c.load("0.0.0", "", "fs");
+    assert.equal(c.getSweepSeen("s1"), undefined);
   } finally {
     cleanup();
   }

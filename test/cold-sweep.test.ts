@@ -43,6 +43,7 @@ async function startFakeDaemon(
     cwd?: string;
     agentId?: string;
     title?: string;
+    updatedAt?: string;
     status: "warm" | "cold";
     importedFromMachine?: string;
     upstreamSessionId?: string;
@@ -98,6 +99,7 @@ test("cold sweep exports cold sessions and skips warm ones", async () => {
       daemonUrl: daemonStub.url,
       token: "fake",
       archive,
+      state,
     });
     assert.equal(result.scanned, 3);
     assert.equal(result.cold, 2);
@@ -153,12 +155,14 @@ test("cold sweep is idempotent — second run uploads nothing new", async () => 
       daemonUrl: daemonStub.url,
       token: "fake",
       archive,
+      state,
     });
     assert.equal(puts, 1);
     await runColdSweep({
       daemonUrl: daemonStub.url,
       token: "fake",
       archive,
+      state,
     });
     assert.equal(puts, 1, "second sweep should not put again — hash unchanged");
     archive.stop();
@@ -215,6 +219,7 @@ test("cold sweep skips passive mirrors but exports locally-bound imports", async
       daemonUrl: daemonStub.url,
       token: "fake",
       archive,
+      state,
     });
     assert.equal(result.scanned, 3);
     assert.equal(result.cold, 2);
@@ -260,6 +265,7 @@ test("cold sweep respects the rule fn", async () => {
       daemonUrl: daemonStub.url,
       token: "fake",
       archive,
+      state,
     });
     const keys = (await backend.list()).map((e) => e.key);
     assert.deepEqual(keys, ["hydra_lineage_s_keep.hydra.archive"]);
@@ -270,11 +276,12 @@ test("cold sweep respects the rule fn", async () => {
   }
 });
 
-test("cold sweep loop re-exports content changes on the interval, then stops", async () => {
+test("cold sweep loop skips unchanged sessions via updatedAt bookmark, re-exports on change, stops", async () => {
   const dir = mkdtempSync(join(tmpdir(), "archiver-cold-loop-"));
-  const daemonStub = await startFakeDaemon([
-    { sessionId: "s_cold", cwd: "/w/c", status: "cold" },
-  ]);
+  // Same array the fake daemon serves on each /v1/sessions call, so a
+  // mutation below simulates the daemon bumping a session's updatedAt.
+  const sessions = [{ sessionId: "s_cold", cwd: "/w/c", status: "cold", updatedAt: "2026-09-01T00:00:00.000Z" }];
+  const daemonStub = await startFakeDaemon(sessions);
   try {
     const backend = new FsBackend({ dir: join(dir, "backend"), prefix: "" });
     await backend.init();
@@ -282,6 +289,7 @@ test("cold sweep loop re-exports content changes on the interval, then stops", a
     const state = new SyncState(join(dir, "state.json"));
     await state.load("0.0.0", "", "fs");
     let puts = 0;
+    let exports = 0;
     const sniffBackend: typeof backend = Object.assign(
       Object.create(Object.getPrototypeOf(backend) as object),
       backend,
@@ -293,12 +301,11 @@ test("cold sweep loop re-exports content changes on the interval, then stops", a
       },
     );
     // Simulates a priority PATCH landing on a cold session: silent at the
-    // daemon (no WS event), so only the periodic sweep can pick it up. The
-    // bundle gains the priority key (only encoded when >0), so the hash
-    // differs and the next sweep tick uploads it.
+    // daemon (no WS event), so only the periodic sweep can pick it up.
     let priority: number | undefined;
     const daemon: Partial<DaemonClient> = {
       exportSession: async (sessionId: string) => {
+        exports += 1;
         const bundle = fakeBundle(sessionId, `hydra_lineage_${sessionId}`);
         return {
           ...bundle,
@@ -321,21 +328,43 @@ test("cold sweep loop re-exports content changes on the interval, then stops", a
       daemonUrl: daemonStub.url,
       token: "fake",
       archive,
+      state,
       intervalMs: 30,
     });
     try {
-      await waitUntil(() => puts >= 1, 2000, "initial sweep should upload once");
+      await waitUntil(
+        () => exports >= 1 && state.getSweepSeen("s_cold") === "2026-09-01T00:00:00.000Z",
+        2000,
+        "initial sweep should export once",
+      );
+      assert.equal(puts, 1, "initial export should upload");
+
+      // Unchanged updatedAt → bookmark skip: subsequent ticks must not even
+      // call exportSession.
+      await delay(120);
+      assert.equal(exports, 1, "unchanged session must not be re-exported");
+
+      // Bookmark survives a process restart (state file reload).
+      const reloaded = new SyncState(join(dir, "state.json"));
+      await reloaded.load("0.0.0", "", "fs");
+      assert.equal(reloaded.getSweepSeen("s_cold"), "2026-09-01T00:00:00.000Z");
+
+      // Priority PATCH lands: daemon bumps updatedAt AND the bundle gains
+      // the priority key (only encoded when >0), so hash differs → upload.
+      sessions[0].updatedAt = "2026-09-02T00:00:00.000Z";
       priority = 2;
       await waitUntil(
-        () => puts >= 2,
+        () => exports >= 2 && state.getSweepSeen("s_cold") === "2026-09-02T00:00:00.000Z",
         2000,
-        "changed priority should re-export on the next sweep tick",
+        "changed session should re-export on the next tick",
       );
+      assert.equal(puts, 2, "new priority should re-upload");
+
       stop();
-      const paused = puts;
-      priority = 0;
+      const pausedPuts = puts;
+      sessions[0].updatedAt = "2026-09-03T00:00:00.000Z";
       await delay(120);
-      assert.equal(puts, paused, "stopped loop must not sweep");
+      assert.equal(puts, pausedPuts, "stopped loop must not sweep");
     } finally {
       stop();
     }

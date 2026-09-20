@@ -172,6 +172,7 @@ async function runExtension(): Promise<void> {
     daemonUrl: config.hydraDaemonUrl,
     token: config.hydraToken,
     archive,
+    state,
     intervalMs: config.coldSweepIntervalMs,
   });
 
