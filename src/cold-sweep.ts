@@ -10,6 +10,10 @@ export interface ColdSweepOptions {
   archive: ArchiveLoop;
 }
 
+export interface ColdSweepLoopOptions extends ColdSweepOptions {
+  intervalMs: number;
+}
+
 // One-shot scan of every session the daemon knows about, exporting any
 // cold ones. Live sessions are skipped here — they're handled by the
 // per-session bridge once discovery sees them. The archive loop's
@@ -70,4 +74,41 @@ async function listSessions(
   }
   const body = (await r.json()) as { sessions: HydraSessionInfo[] };
   return body.sessions;
+}
+
+// Runs the initial cold sweep immediately (backgrounded, matching the old
+// one-shot behavior) and then re-scans every intervalMs. This is what
+// propagates metadata-only changes (priority, title) on cold sessions:
+// the daemon broadcasts nothing for a priority PATCH, so without this
+// re-scan a cleared/raised pin would never re-export. flushNow's
+// hash-dedup keeps unchanged sessions as no-ops, so the periodic cost is
+// a list call plus an export per native cold session, not a backend
+// write per change. The timer is .unref()ed — a pending sweep must not
+// keep the process alive.
+export function startColdSweepLoop(opts: ColdSweepLoopOptions): () => void {
+  let stopped = false;
+  let inFlight = false;
+  const timer = setInterval(() => {
+    void runSweep();
+  }, opts.intervalMs);
+  timer.unref();
+  void runSweep();
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
+
+  async function runSweep(): Promise<void> {
+    if (stopped || inFlight) {
+      return;
+    }
+    inFlight = true;
+    try {
+      await runColdSweep(opts);
+    } catch (err) {
+      log.warn(`cold sweep failed: ${(err as Error).message}`);
+    } finally {
+      inFlight = false;
+    }
+  }
 }

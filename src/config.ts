@@ -20,6 +20,11 @@ export interface Config {
   // How often the pull loop calls backend.list() to discover new remote
   // envelopes uploaded by peers.
   pullIntervalMs: number;
+  // How often the cold sweep re-scans and re-exports cold sessions. The
+  // daemon emits no event for metadata-only changes (priority, title),
+  // so without this they'd never propagate. Hash-dedup makes unchanged
+  // sessions no-ops. 0 disables the periodic sweep.
+  coldSweepIntervalMs: number;
   backend: BackendKind;
   driveFolderName: string;
   fsDir: string;
@@ -213,6 +218,7 @@ export function loadConfig(opts: { requireToken?: boolean } = {}): Config {
     ruleConfigPath,
     uploadDebounceMs: intVal("HYDRA_ACP_ARCHIVER_DEBOUNCE_MS", "DEBOUNCE_MS", conf, 5000),
     pullIntervalMs: intVal("HYDRA_ACP_ARCHIVER_PULL_MS", "PULL_MS", conf, 60000),
+    coldSweepIntervalMs: intVal("HYDRA_ACP_ARCHIVER_COLD_SWEEP_MS", "COLD_SWEEP_MS", conf, 3600000),
     backend,
     driveFolderName: str("HYDRA_ACP_ARCHIVER_DRIVE_FOLDER", "DRIVE_FOLDER", conf, "hydra-acp-archive"),
     fsDir: str("HYDRA_ACP_ARCHIVER_FS_DIR", "FS_DIR", conf, resolve(hydraHome, "archive")),

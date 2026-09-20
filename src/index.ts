@@ -9,7 +9,7 @@ import { ArchiveLoop } from "./archive-loop.js";
 import { EncryptedBackend } from "./backend/encrypted.js";
 import { makeBackend } from "./backend/factory.js";
 import { ArchiverBridge } from "./bridge.js";
-import { runColdSweep } from "./cold-sweep.js";
+import { startColdSweepLoop } from "./cold-sweep.js";
 import { loadConfig, loadEncryptionKey, loadLoginConfig } from "./config.js";
 import { DaemonClient } from "./daemon.js";
 import { HydraDiscovery } from "./discovery.js";
@@ -163,15 +163,16 @@ async function runExtension(): Promise<void> {
   });
   pull.start();
 
-  // Backfill: archive every cold session the daemon knows about.
-  // Runs in the background so the rest of startup (discovery,
+  // Backfill: archive every cold session the daemon knows about, then
+  // re-scan on an interval so metadata-only changes that the daemon
+  // never broadcasts (priority, title) propagate too. The initial run
+  // happens in the background so the rest of startup (discovery,
   // bridges) doesn't block on it. Hash dedup means restarts are cheap.
-  void runColdSweep({
+  const stopColdSweep = startColdSweepLoop({
     daemonUrl: config.hydraDaemonUrl,
     token: config.hydraToken,
     archive,
-  }).catch((err: unknown) => {
-    log.warn(`cold sweep failed: ${(err as Error).message}`);
+    intervalMs: config.coldSweepIntervalMs,
   });
 
   const bridges = new Map<string, ArchiverBridge>();
@@ -232,6 +233,7 @@ async function runExtension(): Promise<void> {
 
   const shutdown = (sig: string): void => {
     log.info(`${sig} received — shutting down`);
+    stopColdSweep();
     discovery.stop();
     pull.stop();
     archive.stop();

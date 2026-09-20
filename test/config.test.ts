@@ -61,6 +61,27 @@ test("loadConfig: invalid TOOL_CONTENT falls back to inline", () => {
   );
 });
 
+test("loadConfig: coldSweepIntervalMs defaults to 1h, honors conf and env", () => {
+  assert.equal(
+    withConfigEnv({}, undefined, () => loadConfig()).coldSweepIntervalMs,
+    3_600_000,
+  );
+  assert.equal(
+    withConfigEnv({}, "COLD_SWEEP_MS=777000\n", () => loadConfig())
+      .coldSweepIntervalMs,
+    777_000,
+  );
+  // env wins over conf.
+  assert.equal(
+    withConfigEnv(
+      { HYDRA_ACP_ARCHIVER_COLD_SWEEP_MS: "15000" },
+      "COLD_SWEEP_MS=9999\n",
+      () => loadConfig(),
+    ).coldSweepIntervalMs,
+    15_000,
+  );
+});
+
 function fixture(): { dir: string; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), "archiver-config-"));
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };

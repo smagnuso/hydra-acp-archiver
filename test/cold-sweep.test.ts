@@ -7,10 +7,27 @@ import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
 import { ArchiveLoop } from "../src/archive-loop.js";
 import { FsBackend } from "../src/backend/fs.js";
-import { runColdSweep } from "../src/cold-sweep.js";
+import { runColdSweep, startColdSweepLoop } from "../src/cold-sweep.js";
 import type { DaemonClient, SessionBundle } from "../src/daemon.js";
 
 const HOST = { host: "h", user: "u" };
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitUntil(
+  pred: () => boolean,
+  timeoutMs: number,
+  msg: string,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (pred()) return;
+    if (Date.now() >= deadline) assert.fail(msg);
+    await delay(10);
+  }
+}
 
 function fakeBundle(sessionId: string, lineage: string): SessionBundle {
   return {
@@ -246,6 +263,82 @@ test("cold sweep respects the rule fn", async () => {
     });
     const keys = (await backend.list()).map((e) => e.key);
     assert.deepEqual(keys, ["hydra_lineage_s_keep.hydra.archive"]);
+    archive.stop();
+  } finally {
+    await daemonStub.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("cold sweep loop re-exports content changes on the interval, then stops", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "archiver-cold-loop-"));
+  const daemonStub = await startFakeDaemon([
+    { sessionId: "s_cold", cwd: "/w/c", status: "cold" },
+  ]);
+  try {
+    const backend = new FsBackend({ dir: join(dir, "backend"), prefix: "" });
+    await backend.init();
+    const { SyncState } = await import("../src/state.js");
+    const state = new SyncState(join(dir, "state.json"));
+    await state.load("0.0.0", "", "fs");
+    let puts = 0;
+    const sniffBackend: typeof backend = Object.assign(
+      Object.create(Object.getPrototypeOf(backend) as object),
+      backend,
+      {
+        put: async (key: string, data: Buffer) => {
+          puts += 1;
+          return backend.put.call(backend, key, data);
+        },
+      },
+    );
+    // Simulates a priority PATCH landing on a cold session: silent at the
+    // daemon (no WS event), so only the periodic sweep can pick it up. The
+    // bundle gains the priority key (only encoded when >0), so the hash
+    // differs and the next sweep tick uploads it.
+    let priority: number | undefined;
+    const daemon: Partial<DaemonClient> = {
+      exportSession: async (sessionId: string) => {
+        const bundle = fakeBundle(sessionId, `hydra_lineage_${sessionId}`);
+        return {
+          ...bundle,
+          session: {
+            ...bundle.session,
+            ...(priority !== undefined ? { priority } : {}),
+          },
+        };
+      },
+    };
+    const archive = new ArchiveLoop({
+      daemon: daemon as DaemonClient,
+      backend: sniffBackend,
+      state,
+      getRule: () => () => true,
+      debounceMs: 5,
+      host: HOST,
+    });
+    const stop = startColdSweepLoop({
+      daemonUrl: daemonStub.url,
+      token: "fake",
+      archive,
+      intervalMs: 30,
+    });
+    try {
+      await waitUntil(() => puts >= 1, 2000, "initial sweep should upload once");
+      priority = 2;
+      await waitUntil(
+        () => puts >= 2,
+        2000,
+        "changed priority should re-export on the next sweep tick",
+      );
+      stop();
+      const paused = puts;
+      priority = 0;
+      await delay(120);
+      assert.equal(puts, paused, "stopped loop must not sweep");
+    } finally {
+      stop();
+    }
     archive.stop();
   } finally {
     await daemonStub.close();
