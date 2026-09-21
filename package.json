@@ -1,6 +1,6 @@
 {
   "name": "@hydra-acp/archiver",
-  "version": "0.1.26",
+  "version": "0.1.27",
   "description": "Session sync extension for hydra-acp — uploads session bundles to a shared backend (Google Drive, fs) and imports peers' bundles.",
   "license": "MIT",
   "type": "module",
