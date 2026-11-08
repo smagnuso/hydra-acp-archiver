@@ -106,10 +106,21 @@ Ships as `hydra-acp-archiver` on PATH. Registered via
   CLI's, keep it in step) and handle the throw from `quoteForCmd`. Open URLs
   only through `open-browser.ts`, which uses `rundll32` on win32: `cmd /c start`
   truncates an OAuth URL at the first `&`.
-- **On Windows `SIGHUP` cannot be sent and `SIGTERM` is a hard kill**
-  (`index.ts`). A rule reload needs an extension restart there, and
-  `shutdown()` must not be the only place that flushes state. `chmod 0o600` on
-  the OAuth token and the archive key is a no-op on Windows.
+- **The rule reloads on file save as well as on `SIGHUP`** (`util/watch.ts`,
+  `reloadRule` in `index.ts`). `SIGHUP` cannot be sent on Windows, so the
+  watcher is the only reload path there; it is non-persistent, so a test that
+  waits on it must hold a live timer or node:test reports "cancelled".
+  `SIGTERM` is a hard kill on Windows, so `shutdown()` must not be the only
+  place that flushes state. `chmod 0o600` on the OAuth token and the archive
+  key is a no-op on Windows.
+- **Write-then-rename of archiver-owned files goes through `renameWithRetry`**
+  (`util/rename-retry.ts`, async). A bare `fs.rename` fails with EPERM, EBUSY or
+  EACCES on Windows when an antivirus scanner or indexer holds the destination.
+- **Platform-dependent text and home handling take the platform as a parameter**
+  (`setup/platform-text.ts`, `util/home.ts`: `confWrittenMessage`, `confLockNote`,
+  `isTransientNpxPath`, `expandHome`, `collapseHome`) so the Windows branch is
+  testable on Linux. Windows never gets a `~` display; expand `~`, `~/` and `~\`
+  on input only.
 
 ## Updating this file
 
