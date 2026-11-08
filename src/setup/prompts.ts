@@ -1,6 +1,5 @@
-import { spawn } from "node:child_process";
+import { openBrowser as openUrl } from "../util/open-browser.js";
 import { createInterface } from "node:readline";
-import { platform } from "node:os";
 
 function isTTY(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
@@ -112,17 +111,9 @@ export function maskToken(t: string): string {
 }
 
 export function openBrowser(url: string): void {
-  const p = platform();
-  const cmd = p === "darwin" ? "open" : p === "win32" ? "start" : "xdg-open";
-  try {
-    const child = spawn(cmd, [url], { stdio: "ignore", detached: true });
-    child.on("error", () => {
-      process.stdout.write(`      Open this URL: ${url}\n`);
-    });
-    child.unref();
-  } catch {
+  openUrl(url, () => {
     process.stdout.write(`      Open this URL: ${url}\n`);
-  }
+  });
 }
 
 export async function pause(label = "Press Enter to continue..."): Promise<void> {

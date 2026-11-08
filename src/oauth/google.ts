@@ -1,10 +1,10 @@
-import { spawn } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { google } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
 import { logger } from "../util/log.js";
+import { openBrowser as openUrl } from "../util/open-browser.js";
 
 const log = logger("oauth");
 
@@ -51,31 +51,9 @@ async function saveToken(path: string, token: StoredToken): Promise<void> {
 }
 
 function tryOpenBrowser(url: string): void {
-  let cmd: string;
-  let args: string[];
-  switch (process.platform) {
-    case "darwin":
-      cmd = "open";
-      args = [url];
-      break;
-    case "win32":
-      cmd = "cmd";
-      args = ["/c", "start", "", url];
-      break;
-    default:
-      cmd = "xdg-open";
-      args = [url];
-      break;
-  }
-  try {
-    const child = spawn(cmd, args, { stdio: "ignore", detached: true });
-    child.on("error", () => {
-      log.info("could not auto-open browser; copy the URL above into a browser");
-    });
-    child.unref();
-  } catch {
+  openUrl(url, () => {
     log.info("could not auto-open browser; copy the URL above into a browser");
-  }
+  });
 }
 
 export interface GoogleAuthOptions {

@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -9,6 +8,7 @@ import { runGoogleLogin } from "../oauth/google.js";
 import { loadAwsCredentials } from "../util/aws-credentials.js";
 import { mergeConf, PRIMARY_CONF_PATH, readExisting, writeConf } from "./conf-writer.js";
 import { ask, askSecret, confirm, pause, pickFromList } from "./prompts.js";
+import { runHydraAcp } from "./run-hydra.js";
 
 type Backend = "google-drive" | "s3" | "fs";
 
@@ -408,7 +408,14 @@ async function step6RegisterExtension(): Promise<void> {
   }
 
   info(`Running: hydra-acp ${cmdArgs.join(" ")}`);
-  const result = spawnSync("hydra-acp", cmdArgs, { stdio: "inherit" });
+  const result = runHydraAcp(cmdArgs);
+  if (result.kind === "unquotable") {
+    blank();
+    warn("Couldn't pass the script path through the Windows shell safely.");
+    info("Register manually later with:");
+    info(`  hydra-acp ${cmdArgs.join(" ")}`);
+    return;
+  }
   if (result.status === 0) {
     ok("Registered.");
     info("Start the daemon (or restart if already running): hydra-acp daemon restart");
