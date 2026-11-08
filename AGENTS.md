@@ -90,6 +90,26 @@ Ships as `hydra-acp-archiver` on PATH. Registered via
   pending flushes cannot keep the process alive. The `finalFlush` on
   the warm→cold transition is the only *guaranteed* last write; don't
   remove it thinking the debounce will catch it.
+- **Treat every path as possibly Windows-shaped, whatever host this runs on.**
+  A cwd, a tool-call path or a session field can arrive as `C:\x`, `C:/x`, a
+  mix, or UNC from a daemon on Windows, even when this code runs on Linux. Never
+  split, prefix-match or find the last separator with a hard-coded `/` on a
+  filesystem path; use `path.relative`, `isAbsolute` and `basename` (URLs and
+  ids are not paths). Containment is `path.relative` plus a first-segment `..`
+  test, never a string prefix. Windows shows full paths, never `~`; expand `~`,
+  `~/` and `~\` on input only. The full checklist (spawning, renames, signals,
+  testing) is in the `hydra-acp/cli` AGENTS.md under "Treat every path as
+  possibly Windows-shaped".
+- **Windows spawn and URL rules** (`src/util/windows-command.ts`,
+  `src/setup/run-hydra.ts`, `src/util/open-browser.ts`). Never spawn a bare
+  npm-installed command on Windows; use `resolveSpawnTarget` (a copy of the
+  CLI's, keep it in step) and handle the throw from `quoteForCmd`. Open URLs
+  only through `open-browser.ts`, which uses `rundll32` on win32: `cmd /c start`
+  truncates an OAuth URL at the first `&`.
+- **On Windows `SIGHUP` cannot be sent and `SIGTERM` is a hard kill**
+  (`index.ts`). A rule reload needs an extension restart there, and
+  `shutdown()` must not be the only place that flushes state. `chmod 0o600` on
+  the OAuth token and the archive key is a no-op on Windows.
 
 ## Updating this file
 
