@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadEncryptionKey, loadConfig } from "../src/config.js";
 
@@ -257,4 +257,13 @@ test("loadEncryptionKey: invalid-content error includes the path", async () => {
   } finally {
     cleanup();
   }
+});
+
+test("loadConfig: conf FS_DIR expands ~ , ~/x and ~\\x against the home dir", () => {
+  const fsDir = (v: string) =>
+    withConfigEnv({ HYDRA_ACP_ARCHIVER_FS_DIR: undefined }, `FS_DIR=${v}\n`, () => loadConfig()).fsDir;
+  assert.equal(fsDir("~"), homedir());
+  assert.equal(fsDir("~/archive"), homedir() + "/archive");
+  assert.equal(fsDir("~\\archive"), homedir() + "\\archive");
+  assert.equal(fsDir("~other"), "~other");
 });

@@ -2,6 +2,7 @@ import { readFile, readFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
+import { expandHome } from "./util/home.js";
 
 const readFileAsync = promisify(readFile);
 
@@ -54,9 +55,7 @@ function confPath(hydraHome: string): string {
 }
 
 function expandTilde(val: string): string {
-  if (val === "~" || val.startsWith("~/"))
-    return homedir() + val.slice(1);
-  return val;
+  return expandHome(val, homedir());
 }
 
 function parseConfFile(text: string): Map<string, string> {

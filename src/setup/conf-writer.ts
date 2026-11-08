@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
+import { confLockNote } from "./platform-text.js";
 
 export const PRIMARY_CONF_PATH = resolve(homedir(), ".hydra-acp", "archiver.conf");
 
@@ -46,9 +47,9 @@ export function readExisting(path: string): { text: string; map: Map<string, str
   return { text, map };
 }
 
-const HEADER = `# hydra-acp-archiver config — written by 'hydra-acp-archiver setup'.
-# Lock this file: chmod 600.
-`;
+function header(platform: NodeJS.Platform): string {
+  return `# hydra-acp-archiver config — written by 'hydra-acp-archiver setup'.\n${confLockNote(platform)}\n`;
+}
 
 function quoteIfNeeded(value: string): string {
   if (/[\s#'"]/.test(value))
@@ -56,7 +57,11 @@ function quoteIfNeeded(value: string): string {
   return value;
 }
 
-export function mergeConf(existing: string, updates: ConfUpdate): string {
+export function mergeConf(
+  existing: string,
+  updates: ConfUpdate,
+  platform: NodeJS.Platform = process.platform,
+): string {
   const lines = parseLines(existing);
   const remaining = new Map<string, string>();
   for (const [k, v] of Object.entries(updates)) {
@@ -77,7 +82,7 @@ export function mergeConf(existing: string, updates: ConfUpdate): string {
 
   if (!existing) {
     out.length = 0;
-    out.push(HEADER.trimEnd());
+    out.push(header(platform).trimEnd());
     out.push("");
   }
 

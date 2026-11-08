@@ -112,3 +112,14 @@ test("writeConf: cross-backend transition preserves stale keys", () => {
   assert.match(text, /^FS_DIR=\/tmp\/archive$/m);
   assert.match(text, /^DRIVE_FOLDER=team-archive$/m);
 });
+
+test("mergeConf: POSIX header tells the user to chmod 600", () => {
+  const out = mergeConf("", { BACKEND: "fs" }, "linux");
+  assert.match(out, /^# Lock this file: chmod 600\.$/m);
+});
+
+test("mergeConf: win32 header does not mention chmod", () => {
+  const out = mergeConf("", { BACKEND: "fs" }, "win32");
+  assert.doesNotMatch(out, /chmod/);
+  assert.match(out, /Windows file modes are not applied/);
+});

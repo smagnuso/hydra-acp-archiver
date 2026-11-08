@@ -6,7 +6,9 @@ import { loadLoginConfig } from "../config.js";
 import { runKeygen } from "../keygen.js";
 import { runGoogleLogin } from "../oauth/google.js";
 import { loadAwsCredentials } from "../util/aws-credentials.js";
+import { expandHome } from "../util/home.js";
 import { mergeConf, PRIMARY_CONF_PATH, readExisting, writeConf } from "./conf-writer.js";
+import { confWrittenMessage, isTransientNpxPath } from "./platform-text.js";
 import { ask, askSecret, confirm, pause, pickFromList } from "./prompts.js";
 import { runHydraAcp } from "./run-hydra.js";
 
@@ -262,7 +264,7 @@ async function step3cFilesystem(): Promise<FsResult> {
       dir = DEFAULT_FS_DIR;
     } else if (reply === "c") {
       const custom = await ask("Archive directory", DEFAULT_FS_DIR);
-      dir = custom.startsWith("~/") ? custom.replace(/^~/, homedir()) : custom;
+      dir = expandHome(custom, homedir());
     } else {
       const n = Number.parseInt(reply, 10);
       if (Number.isInteger(n) && n >= 1 && n <= suggestions.length)
@@ -272,7 +274,7 @@ async function step3cFilesystem(): Promise<FsResult> {
       fail("Invalid choice.");
   } else {
     const raw = await ask("Archive directory", DEFAULT_FS_DIR);
-    dir = raw.startsWith("~/") ? raw.replace(/^~/, homedir()) : raw;
+    dir = expandHome(raw, homedir());
   }
 
   try {
@@ -358,7 +360,7 @@ async function step5WriteConfig(args: Step5Args): Promise<void> {
     updates.KEY_PATH = args.encryption.keyPath;
 
   writeConf(PRIMARY_CONF_PATH, updates);
-  ok(`Wrote ${PRIMARY_CONF_PATH} (chmod 600).`);
+  ok(confWrittenMessage(PRIMARY_CONF_PATH));
 
   blank();
   info("Final config:");
@@ -396,7 +398,7 @@ async function step6RegisterExtension(): Promise<void> {
     const scriptPath = process.argv[1] ?? "";
     if (!scriptPath) {
       warn("Couldn't determine script path; falling back to bare command.");
-    } else if (scriptPath.includes("/.npm/_npx/")) {
+    } else if (isTransientNpxPath(scriptPath)) {
       warn("Looks like you're running via npx — registering this transient path");
       warn("would break on the next npx cache cleanup. Install globally first:");
       info("  npm install -g @hydra-acp/archiver");

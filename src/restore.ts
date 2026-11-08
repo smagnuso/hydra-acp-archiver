@@ -9,6 +9,7 @@ import { DaemonClient, type SessionBundle } from "./daemon.js";
 import { deserialize, lineageFromKey } from "./envelope.js";
 import { loadLocalIndex, type LocalSessionMeta } from "./local-index.js";
 import { resolvePrefix } from "./prefix.js";
+import { collapseHome as collapseHomePath } from "./util/home.js";
 import { logger, setDebug } from "./util/log.js";
 
 const log = logger("restore");
@@ -283,9 +284,7 @@ function relTime(iso: string | undefined): string {
 
 function collapseHome(p: string | undefined): string {
   if (!p) return "";
-  const home = process.env.HOME;
-  if (home && p.startsWith(home)) return "~" + p.slice(home.length);
-  return p;
+  return collapseHomePath(p, homedir());
 }
 
 export async function runRestoreList(args: RestoreListArgs): Promise<void> {
