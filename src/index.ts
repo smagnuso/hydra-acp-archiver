@@ -20,6 +20,7 @@ import { PullLoop } from "./pull-loop.js";
 import { DEFAULT_RULE, loadRule, type RuleFunction } from "./rule.js";
 import { SyncState } from "./state.js";
 import { logger, setDebug } from "./util/log.js";
+import { watchConfigPath } from "./util/watch.js";
 
 const log = logger("main");
 
@@ -220,8 +221,8 @@ async function runExtension(): Promise<void> {
   });
   discovery.start();
 
-  process.on("SIGHUP", () => {
-    log.info(`SIGHUP — reloading rule from ${config.ruleConfigPath}`);
+  const reloadRule = (reason: string): void => {
+    log.info(`${reason}, reloading rule from ${config.ruleConfigPath}`);
     loadRule(config.ruleConfigPath)
       .then((rule) => {
         currentRule = rule;
@@ -230,10 +231,18 @@ async function runExtension(): Promise<void> {
       .catch((err: unknown) => {
         log.warn(`rule reload failed: ${(err as Error).message}`);
       });
+  };
+
+  const ruleWatcher = watchConfigPath({
+    path: config.ruleConfigPath,
+    onChange: () => reloadRule("rule file changed"),
+    onError: (err) => log.warn(`rule watcher error: ${err.message}`),
   });
+  process.on("SIGHUP", () => reloadRule("SIGHUP"));
 
   const shutdown = (sig: string): void => {
     log.info(`${sig} received — shutting down`);
+    ruleWatcher.stop();
     stopColdSweep();
     discovery.stop();
     pull.stop();

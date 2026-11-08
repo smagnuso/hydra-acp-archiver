@@ -300,7 +300,7 @@ export default function archive(ev) {
 }
 ```
 
-Return `false` to skip an upload. Any other value (including `undefined`) archives. The rule reloads on SIGHUP, so you don't need to restart the daemon to change it.
+Return `false` to skip an upload. Any other value (including `undefined`) archives. The rule reloads when the file changes (this is the reload path on Windows, where SIGHUP cannot be sent) and on SIGHUP on POSIX, so you don't need to restart the daemon to change it.
 
 ## On-disk state
 
