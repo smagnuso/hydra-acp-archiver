@@ -5,26 +5,27 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { watchConfigPath } from "../../src/util/watch.js";
 
+const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
+
 function changed(path: string, write: () => void): Promise<boolean> {
   return new Promise((resolve) => {
     // Not unref'd. The watcher is non-persistent, so without a live timer the
     // process can exit between the write and the event, which node:test
     // reports as a cancelled test rather than a failed one.
-    const giveUp = setTimeout(() => {
+    const finish = (value: boolean): void => {
+      clearTimeout(giveUp);
+      clearTimeout(writeTimer);
       handle.stop();
-      resolve(false);
-    }, 4000);
+      resolve(value);
+    };
+    const giveUp = setTimeout(() => finish(false), 4000);
     const handle = watchConfigPath({
       path,
       debounceMs: 20,
-      onChange: () => {
-        clearTimeout(giveUp);
-        handle.stop();
-        resolve(true);
-      },
+      onChange: () => finish(true),
     });
     // Past the watcher arming, so the event is not lost to a race.
-    setTimeout(write, 100);
+    const writeTimer = setTimeout(write, 100);
   });
 }
 
@@ -63,6 +64,9 @@ test("watchConfigPath fires when an existing config file is rewritten", async ()
   try {
     const p = join(dir, "rule.config.js");
     writeFileSync(p, "export default () => true;\n");
+    // macOS can report a write made just before the watcher started; let that
+    // settle so the event below is the rewrite and not the setup write.
+    await sleep(600);
     assert.equal(await changed(p, () => writeFileSync(p, "export default () => false;\n")), true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
