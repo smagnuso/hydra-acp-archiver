@@ -1,6 +1,7 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { logger } from "./util/log.js";
+import { renameWithRetry, type RenameRetryDeps } from "./util/rename-retry.js";
 
 const log = logger("state");
 
@@ -44,7 +45,10 @@ export class SyncState {
   private cache: StateFile | undefined;
   private writeChain: Promise<void> = Promise.resolve();
 
-  constructor(private readonly path: string) {}
+  constructor(
+    private readonly path: string,
+    private readonly renameDeps: RenameRetryDeps = {},
+  ) {}
 
   async load(appVersion: string, prefix: string, backend: string): Promise<void> {
     try {
@@ -174,7 +178,7 @@ export class SyncState {
       await mkdir(dirname(this.path), { recursive: true });
       const tmp = `${this.path}.tmp`;
       await writeFile(tmp, snapshot, { mode: 0o600 });
-      await rename(tmp, this.path);
+      await renameWithRetry(tmp, this.path, this.renameDeps);
     });
     this.writeChain = next.catch((err: unknown) => {
       log.warn(`failed to persist ${this.path}: ${(err as Error).message}`);

@@ -249,3 +249,27 @@ test("app version change clears pull state but preserves upload hashes", async (
     cleanup();
   }
 });
+
+test("flush retries a transient rename failure and persists", async () => {
+  const { path, cleanup } = tmpStatePath();
+  try {
+    let attempts = 0;
+    const realRename = (await import("node:fs/promises")).rename;
+    const s = new SyncState(path, {
+      rename: async (from, to) => {
+        attempts += 1;
+        if (attempts < 3) {
+          throw Object.assign(new Error("EBUSY"), { code: "EBUSY" });
+        }
+        await realRename(from, to);
+      },
+      sleep: async () => {},
+    });
+    await s.load("0.0.0", "", "fs");
+    await s.set("lin", { lastUploadedHash: "h" });
+    assert.equal(attempts, 3);
+    assert.equal(existsSync(path), true);
+  } finally {
+    cleanup();
+  }
+});

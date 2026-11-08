@@ -2,13 +2,13 @@ import {
   mkdir,
   readFile,
   readdir,
-  rename,
   stat,
   unlink,
   writeFile,
 } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { logger } from "../util/log.js";
+import { renameWithRetry, type RenameRetryDeps } from "../util/rename-retry.js";
 import type { SyncBackend, SyncBackendEntry } from "./types.js";
 
 const log = logger("backend.fs");
@@ -16,6 +16,7 @@ const log = logger("backend.fs");
 export interface FsBackendOptions {
   dir: string;
   prefix: string;
+  renameDeps?: RenameRetryDeps;
 }
 
 // Filesystem-backed implementation. Useful for tests, for users who want
@@ -78,7 +79,7 @@ export class FsBackend implements SyncBackend {
     const tmp = `${dest}.tmp`;
     await mkdir(dirname(dest), { recursive: true });
     await writeFile(tmp, data);
-    await rename(tmp, dest);
+    await renameWithRetry(tmp, dest, this.opts.renameDeps);
   }
 
   async delete(key: string): Promise<void> {

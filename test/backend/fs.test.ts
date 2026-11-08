@@ -278,3 +278,53 @@ test("prefix with trailing slash works identically to without (auto-prefix forma
     cleanup();
   }
 });
+
+test("put retries a transient rename failure and lands the data", async () => {
+  const { dir, cleanup } = fixture();
+  try {
+    let attempts = 0;
+    const { rename: realRename } = await import("node:fs/promises");
+    const fs = new FsBackend({
+      dir,
+      prefix: "",
+      renameDeps: {
+        rename: async (from, to) => {
+          attempts += 1;
+          if (attempts < 3) {
+            throw Object.assign(new Error("EPERM"), { code: "EPERM" });
+          }
+          await realRename(from, to);
+        },
+        sleep: async () => {},
+      },
+    });
+    await fs.init();
+    await fs.put("a.bin", Buffer.from("hi"));
+    assert.equal(attempts, 3);
+    assert.equal(readFileSync(join(dir, "a.bin"), "utf8"), "hi");
+    assert.equal(existsSync(join(dir, "a.bin.tmp")), false);
+  } finally {
+    cleanup();
+  }
+});
+
+test("put removes the tmp file and rethrows on a non-retryable rename error", async () => {
+  const { dir, cleanup } = fixture();
+  try {
+    const fs = new FsBackend({
+      dir,
+      prefix: "",
+      renameDeps: {
+        rename: async () => {
+          throw Object.assign(new Error("ENOSPC"), { code: "ENOSPC" });
+        },
+        sleep: async () => {},
+      },
+    });
+    await fs.init();
+    await assert.rejects(fs.put("a.bin", Buffer.from("hi")), /ENOSPC/);
+    assert.equal(existsSync(join(dir, "a.bin.tmp")), false);
+  } finally {
+    cleanup();
+  }
+});
